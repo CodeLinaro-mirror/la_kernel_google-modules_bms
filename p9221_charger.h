@@ -19,6 +19,7 @@
 #include <linux/gpio.h>
 #include <linux/crc8.h>
 #include "pmic-voter.h" /* TODO(b/163679860): use gvotables */
+#include "gbms_power_supply.h"
 
 #define P9221_WLC_VOTER				"WLC_VOTER"
 #define P9221_USER_VOTER			"WLC_USER_VOTER"
@@ -71,11 +72,15 @@
 
 #define P9XXX_DC_ICL_EPP_1000		1000000
 #define P9XXX_DC_ICL_EPP_750		750000
+#define P9XXX_DC_ICL_EPP_100		100000
 #define P9XXX_NEG_POWER_10W		(10 / 0.5)
 #define P9XXX_NEG_POWER_11W		(11 / 0.5)
 #define P9382_RTX_TIMEOUT_MS		(2 * 1000)
 #define WLCDC_DEBOUNCE_TIME_S		400
-#define WLCDC_AUTH_CHECK_MS		(5 * 1000)
+#define WLCDC_AUTH_CHECK_S		15
+#define WLCDC_AUTH_CHECK_INTERVAL_MS	(2 * 1000)
+#define WLCDC_AUTH_CHECK_INIT_DELAY_MS	(6 * 1000)
+
 /*
  * P9221 common registers
  */
@@ -140,6 +145,7 @@
 #define P9221R5_EPP_TX_GUARANTEED_POWER_REG	0x84
 #define P9221R5_EPP_TX_POTENTIAL_POWER_REG	0x85
 #define P9221R5_EPP_TX_CAPABILITY_FLAGS_REG	0x86
+#define P9221R5_EPP_TX_CAPABILITY_FLAGS_AR	BIT(6)
 #define P9221R5_EPP_RENEGOTIATION_REG		0x87
 #define P9221R5_EPP_CUR_RPP_HEADER_REG		0x88
 #define P9221R5_EPP_CUR_NEGOTIATED_POWER_REG	0x89
@@ -363,6 +369,7 @@
 #define TX_ACCESSORY_TYPE			(ACCESSORY_TYPE_PHONE | \
 						 AICL_ENABLED)
 #define TXID_SEND_DELAY_MS			(1 * 1000)
+#define TXID_SEND_AGAIN_DELAY_MS		(300 * 1000)
 #define TXSOC_SEND_DELAY_MS			(5 * 1000)
 
 #define COM_BUSY_MAX				10
@@ -535,6 +542,11 @@ struct p9221_charger_feature {
 	bool session_valid;
 };
 
+struct p9221_charger_cc_data_lock {
+	bool cc_use;
+	ktime_t cc_rcv_at;
+};
+
 struct p9221_charger_platform_data {
 	int				irq_gpio;
 	int				irq_int;
@@ -615,6 +627,7 @@ struct p9221_charger_data {
 	struct p9221_charger_ints_bit	ints;
 	struct power_supply		*wc_psy;
 	struct power_supply		*dc_psy;
+	struct power_supply		*fg_psy;
 	struct votable			*dc_icl_votable;
 	struct votable			*dc_suspend_votable;
 	struct votable			*tx_icl_votable;
@@ -635,6 +648,7 @@ struct p9221_charger_data {
 	struct delayed_work		rtx_work;
 	struct delayed_work		power_mitigation_work;
 	struct delayed_work		auth_dc_icl_work;
+	struct delayed_work		fg_work;
 	struct work_struct		uevent_work;
 	struct work_struct		rtx_disable_work;
 	struct work_struct		rtx_reset_work;
@@ -647,6 +661,7 @@ struct p9221_charger_data {
 	struct logbuffer		*rtx_log;
 	struct dentry			*debug_entry;
 	struct p9221_charger_feature	chg_features;
+	struct p9221_charger_cc_data_lock	cc_data_lock;
 	u16				chip_id;
 	int				online;
 	bool				enabled;
@@ -724,7 +739,13 @@ struct p9221_charger_data {
 	struct mutex			auth_lock;
 	int 				ll_bpp_cep;
 	int				last_disable;
+	ktime_t				irq_at;
+	int				renego_state;
+	struct mutex			renego_lock;
 	bool				send_eop;
+	wait_queue_head_t		ccreset_wq;
+	bool				cc_reset_pending;
+	int				send_txid_cnt;
 
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	struct gpio_chip gpio;
@@ -821,6 +842,12 @@ enum p9382_rtx_err {
 	RTX_HARD_OCP,
 };
 
+enum p9xxx_renego_state {
+	P9XXX_AVAILABLE = 0,
+	P9XXX_SEND_DATA,
+	P9XXX_ENABLE_PROPMODE,
+};
+
 #define P9221_MA_TO_UA(ma)((ma) * 1000)
 #define P9221_UA_TO_MA(ua) ((ua) / 1000)
 #define P9221_MV_TO_UV(mv) ((mv) * 1000)
@@ -833,6 +860,7 @@ enum p9382_rtx_err {
 #define P9412_MW_TO_HW(mw) (((mw) * 2) / 1000) /* mw -> 0.5 W units */
 #define P9412_HW_TO_MW(hw) (((hw) / 2) * 1000) /* 0.5 W units -> mw */
 #define get_boot_sec() div_u64(ktime_to_ns(ktime_get_boottime()), NSEC_PER_SEC)
+#define get_boot_msec() div_u64(ktime_to_ns(ktime_get_boottime()), NSEC_PER_MSEC)
 
 #define p9xxx_chip_get_tx_id(chgr, id) (chgr->reg_tx_id_addr < 0 ? \
       -ENOTSUPP : chgr->reg_read_n(chgr, chgr->reg_tx_id_addr, id, sizeof(*id)))
@@ -846,6 +874,5 @@ enum p9382_rtx_err {
       -ENOTSUPP : chgr->reg_write_n(chgr, chgr->reg_set_fod_addr, data, len))
 #define p9xxx_chip_get_fod_reg(chgr, data, len) (chgr->reg_set_fod_addr == 0 ? \
       -ENOTSUPP : chgr->reg_read_n(chgr, chgr->reg_set_fod_addr, data, len))
-
 
 #endif /* __P9221_CHARGER_H__ */
