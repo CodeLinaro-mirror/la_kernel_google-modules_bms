@@ -5,22 +5,7 @@
 GBMS_MODULES =	GOOGLE_BMS \
 		GOOGLE_BATTERY \
 		GOOGLE_CHARGER \
-		GOOGLE_CPM \
-		GOOGLE_BEE \
-		GOOGLE_DUAL_BATT_GAUGE \
-		GOOGLE_DOCK \
-		USB_OVERHEAT_MITIGATION \
-		PMIC_MAX77729 \
-		UIC_MAX77729 \
-		CHARGER_MAX77729 \
-		CHARGER_MAX77759 \
-		MAXQ_MAX77759 \
-		CHARGER_P9221 \
-		MAX1720X_BATTERY \
-		MAX_M5 \
-		PCA9468 \
-		MAX20339
-
+		GOOGLE_BMS_SW5100 \
 
 obj-$(CONFIG_GOOGLE_BMS)	+= google-bms.o
 google-bms-objs += google_bms.o
@@ -29,10 +14,10 @@ google-bms-objs += gbms_storage.o
 # require a change in the API since right now storage call into eeprom that
 # calls back into storage.
 # KBUILD_OPTIONS += CONFIG_GOOGLE_BEE=m \
-# obj-$(CONFIG_GOOGLE_BEE)	+= google_eeprom.o
-google-bms-objs += google_eeprom.o
-google-bms-objs += google_eeprom_01.o
-google-bms-objs += gs101_usecase.o
+
+obj-$(CONFIG_GOOGLE_BEE)	+= google_eeprom.o
+obj-$(CONFIG_GOOGLE_BEE)	+= google_eeprom_01.o
+obj-$(CONFIG_GOOGLE_BEE)	+= gs101_usecase.o
 
 # Battery
 obj-$(CONFIG_GOOGLE_BATTERY) += google-battery.o
@@ -42,7 +27,6 @@ google-battery-objs += google_ttf.o
 # google_charger
 obj-$(CONFIG_GOOGLE_CHARGER) += google-charger.o
 google-charger-objs += google_charger.o
-google-charger-objs += google_dc_pps.o
 
 # google_dual_batt_gauge
 obj-$(CONFIG_GOOGLE_DUAL_BATT_GAUGE)	+= google_dual_batt_gauge.o
@@ -106,6 +90,9 @@ max1720x-battery-objs += max_m5.o
 # OVP
 obj-$(CONFIG_MAX20339)	+= max20339.o
 
+#SW5100 BMS
+obj-$(CONFIG_GOOGLE_BMS_SW5100) += sw5100_bms.o
+
 # prevent warnings
 WENUMS=-Wno-enum-conversion -Wno-switch
 
@@ -129,9 +116,13 @@ M ?= $(shell pwd)
 
 KBUILD_OPTIONS += $(foreach m,$(GBMS_MODULES),CONFIG_$(m)=m )
 
+EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/drivers/power/supply/qcom
+EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE $(foreach m,$(GBMS_MODULES),-DCONFIG_$(m)_MODULE)
+EXTRA_CFLAGS	+= -DCONFIG_DISABLE_GOOGLE_DC_PPS
+
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) \
-		EXTRA_CFLAGS="-DDYNAMIC_DEBUG_MODULE $(foreach m,$(GBMS_MODULES),-DCONFIG_$(m)_MODULE)" \
+		EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
 		$(@)
 
 modules_install clean:
