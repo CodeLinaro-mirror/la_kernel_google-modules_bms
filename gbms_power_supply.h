@@ -25,6 +25,7 @@ enum {
 	GBMS_TAPER_CONTROL_ON,
 };
 
+#if !IS_ENABLED(CONFIG_GOOGLE_BMS_SW5100)
 /* Indicates USB Type-C CC connection status */
 /* Deprecated */
 enum power_supply_typec_mode {
@@ -66,7 +67,7 @@ enum power_supply_typec_power_role {
 	POWER_SUPPLY_TYPEC_PR_SINK,
 	POWER_SUPPLY_TYPEC_PR_SOURCE,
 };
-
+#endif
 enum gbms_property {
 	/* I am not proud of this */
 	GBMS_PROP_LOCAL_EXTENSIONS = POWER_SUPPLY_PROP_SERIAL_NUMBER + 100,

@@ -75,6 +75,11 @@ config DISABLE_GOOGLE_DC_PPS
 	help
 	  Say Y to disable PPS charging support
 
+config GOOGLE_BMS_SW5100
+	tristate "Google BMS SW5100"
+	help
+	  Say Y to enable Google BMS functions for Qualcomm SW5100 platform
+
 endif	# GOOGLE_BMS
 
 config CHARGER_P9221
