@@ -420,6 +420,7 @@ static inline void chg_init_state(struct chg_drv *chg_drv)
 		chg_drv->pps_data.stage = PPS_NONE;
 }
 
+#ifdef ENABLE_GOOGLE_DC_PPS
 /*
  * called from google_charger direcly on a tcpm_psy.
  * NOTE: Do not call on anything else!
@@ -442,7 +443,7 @@ static int chg_update_capability(struct power_supply *tcpm_psy, unsigned int nr_
 
 	return ret;
 }
-
+#endif
 /* NOTE: doesn't reset chg_drv->adapter_details.v = 0 see chg_work() */
 static inline int chg_reset_state(struct chg_drv *chg_drv)
 {
@@ -452,7 +453,7 @@ static inline int chg_reset_state(struct chg_drv *chg_drv)
 
 	if (chg_drv->chg_term.enable)
 		chg_reset_termination_data(chg_drv);
-
+#ifdef ENABLE_GOOGLE_DC_PPS
 	if (!pps_is_disabled(chg_drv->pps_data.stage) || chg_drv->chg_term.usb_5v == 1) {
 		unsigned int nr_pdo = chg_drv->pps_data.default_pps_pdo ?
 				      PDO_PPS : PDO_FIXED_HIGH_VOLTAGE;
@@ -460,7 +461,7 @@ static inline int chg_reset_state(struct chg_drv *chg_drv)
 		chg_update_capability(chg_drv->tcpm_psy, nr_pdo,
 				      chg_drv->pps_data.default_pps_pdo);
 	}
-
+#endif
 	if (chg_drv->chg_term.usb_5v == 1)
 		chg_drv->chg_term.usb_5v = 0;
 
@@ -1975,6 +1976,7 @@ static int chg_run_defender(struct chg_drv *chg_drv)
 	return 0;
 }
 
+#ifdef ENABLE_GOOGLE_DC_PPS
 /* ------------------------------------------------------------------------ */
 
 /*
@@ -2046,7 +2048,7 @@ int chg_switch_profile(struct pd_pps_data *pps, struct power_supply *tcpm_psy,
 
 	return ret;
 }
-
+#endif
 
 static void chg_update_csi(struct chg_drv *chg_drv)
 {
@@ -2325,6 +2327,7 @@ update_charger:
 
 	}
 
+#ifdef ENABLE_GOOGLE_DC_PPS
 	/* tied to the charger: could tie to battery @ 100% instead */
 	if ((chg_drv->chg_term.usb_5v == 0) && chg_done) {
 		pr_info("MSC_CHG switch to 5V on full\n");
@@ -2336,7 +2339,7 @@ update_charger:
 		chg_update_capability(chg_drv->tcpm_psy, PDO_FIXED_HIGH_VOLTAGE,
 				      0);
 	}
-
+#endif
 	/* WAR: battery overcharge on a weak adapter */
 	if (chg_drv->chg_term.enable && chg_done) {
 		int soc;
@@ -3759,6 +3762,7 @@ static int chg_init_fs(struct chg_drv *chg_drv)
 }
 
 
+#ifdef ENABLE_GOOGLE_DC_PPS
 /*
  * barebone initial pps policy.
  * Works only on output voltage keeping output current to the max.
@@ -3876,6 +3880,7 @@ static int msc_update_pps(struct chg_drv *chg_drv, int fv_uv, int cc_max)
 
 	return rc;
 }
+#endif
 
 /*
  * NOTE: chg_work() vote 0 at the beginning of each loop to gate the updates
@@ -3915,7 +3920,7 @@ static int msc_update_charger_cb(struct gvotable_election *el,
 		update_interval = CHG_WORK_ERROR_RETRY_MS;
 		goto msc_reschedule;
 	}
-
+#ifdef ENABLE_GOOGLE_DC_PPS
 	if (chg_drv->pps_data.stage == PPS_ACTIVE) {
 		int pps_ui;
 
@@ -3927,7 +3932,7 @@ static int msc_update_charger_cb(struct gvotable_election *el,
 		if (pps_ui >= 0 && pps_ui < update_interval)
 			update_interval = pps_ui;
 	}
-
+#endif
 	/* adjust charger for target demand */
 	rc = chg_update_charger(chg_drv, fv_uv, cc_max, topoff);
 	if (rc == -EAGAIN)

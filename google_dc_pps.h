@@ -105,6 +105,99 @@ struct tcpm_port *chg_get_tcpm_port(struct power_supply *tcpm_psy);
 
 
 struct dentry;
+
+#if IS_ENABLED(CONFIG_DISABLE_GOOGLE_DC_PPS)
+
+static inline int pps_init(struct pd_pps_data *pps_data, struct device *dev,
+			   struct power_supply *pps_psy)
+{
+	return -EINVAL;
+}
+static inline int pps_init_fs(struct pd_pps_data *pps_data, struct dentry *de)
+{
+	return -EINVAL;
+}
+static inline void pps_init_state(struct pd_pps_data *pps_data) {}
+static inline void pps_free(struct pd_pps_data *pps_data) {}
+
+static inline int pps_work(struct pd_pps_data *pps, struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+
+static inline int pps_ping(struct pd_pps_data *pps, struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+static inline int pps_keep_alive(struct pd_pps_data *pps, struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+static inline int pps_update_adapter(struct pd_pps_data *pps_data,
+				     int pending_uv, int pending_ua,
+				     struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+static inline int pps_check_adapter(struct pd_pps_data *pps,
+				    int pending_uv, int pending_ua,
+				    struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+
+static inline int pps_prog_offline(struct pd_pps_data *pps, struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+
+static inline void pps_adjust_volt(struct pd_pps_data *pps, int mod) {}
+
+static inline int chg_switch_profile(struct pd_pps_data *pps, struct power_supply *tcpm_psy,
+				     bool more_pwr)
+{
+	return -EINVAL;
+}
+
+static inline int pps_get_apdo_max_power(struct pd_pps_data *pps, unsigned int *ta_idx,
+					 unsigned int *ta_max_vol, unsigned int *ta_max_cur,
+					 unsigned long *ta_max_pwr)
+{
+	return -EINVAL;
+}
+
+static inline bool pps_check_prog_online(struct pd_pps_data *pps_data)
+{
+	return false;
+}
+static inline bool pps_prog_check_online(struct pd_pps_data *pps_data,
+					 struct power_supply *tcpm_psy)
+{
+	return false;
+}
+
+static inline int pps_get_src_cap(struct pd_pps_data *pps, struct power_supply *tcpm_psy)
+{
+	return -EINVAL;
+}
+static inline void pps_set_logbuffer(struct pd_pps_data *pps_data, struct logbuffer *log) {}
+static inline void pps_log(struct pd_pps_data *pps, const char *fmt, ...) {}
+
+static inline struct power_supply *pps_get_tcpm_psy(struct device_node *node, size_t size)
+{
+	return NULL;
+}
+
+static inline int pps_request_pdo(struct pd_pps_data *pps_data, unsigned int ta_idx,
+				  unsigned int ta_max_vol, unsigned int ta_max_cur)
+{
+	return -EINVAL;
+}
+
+#else // PPS is enabled
+
+#define ENABLE_GOOGLE_DC_PPS
+
 int pps_init(struct pd_pps_data *pps_data, struct device *dev,
 	     struct power_supply *pps_psy);
 int pps_init_fs(struct pd_pps_data *pps_data, struct dentry *de);
@@ -155,6 +248,5 @@ struct power_supply *pps_get_tcpm_psy(struct device_node *node, size_t size);
 int pps_request_pdo(struct pd_pps_data *pps_data, unsigned int ta_idx,
 		    unsigned int ta_max_vol, unsigned int ta_max_cur);
 
-
-
+#endif /* CONFIG_DISABLE_GOOGLE_DC_PPS */
 #endif /* __GOOGLE_DC_PPS_H_ */

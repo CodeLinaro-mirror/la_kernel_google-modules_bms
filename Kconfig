@@ -69,6 +69,12 @@ config GOOGLE_BEE
 	  The EEPROM contains the battery type, lifetime data and other
 	  infomation.
 
+config DISABLE_GOOGLE_DC_PPS
+	tristate "Disable PPS support"
+	depends on GOOGLE_CHARGER
+	help
+	  Say Y to disable PPS charging support
+
 endif	# GOOGLE_BMS
 
 config CHARGER_P9221
