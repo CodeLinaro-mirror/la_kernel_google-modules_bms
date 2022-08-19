@@ -1134,6 +1134,7 @@ static struct gbee_data {
 struct delayed_work bee_work;
 static struct mutex bee_lock;
 
+#if IS_ENABLED(GOOGLE_BEE)
 /*
  * lookup for battery eeprom.
  * TODO: extend this to multiple NVM like providers
@@ -1189,6 +1190,7 @@ static void gbee_probe_work(struct work_struct *work)
 
 	pr_info("gbee@ %s OK\n", beed->bee_name);
 }
+#endif
 
 static void gbee_destroy(struct gbee_data *beed)
 {
@@ -1236,7 +1238,10 @@ static int __init gbms_storage_init(void)
 	spin_lock_init(&providers_lock);
 
 	mutex_init(&bee_lock);
+
+#if IS_ENABLED(GOOGLE_BEE)
 	INIT_DELAYED_WORK(&bee_work, gbee_probe_work);
+#endif
 
 	gbms_cache_pool = gen_pool_create(pe_size, -1);
 	if (gbms_cache_pool) {
