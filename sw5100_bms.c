@@ -45,6 +45,7 @@ struct bms_dev {
 	struct	regmap			*pmic_regmap;
 	struct	votable			*fv_votable;
 	struct	votable			*fcc_votable;
+	struct	votable			*dc_suspend_votable;
 	struct	notifier_block		nb;
 	int				batt_id_ohms;
 	u32				rradc_base;
@@ -1155,6 +1156,14 @@ static int sw5100_notifier_cb(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+static int sw5100_dc_suspend_vote_callback(struct votable *votable, void *data,
+					     int disable, const char *client)
+{
+	/* DC suspend isn't supported but function is needed for compatibility */
+
+	return 0;
+}
+
 /* All init functions below this */
 #define PERPH_TYPE_REG				0x04
 #define QG_TYPE					0x0D
@@ -1285,6 +1294,15 @@ static int bms_probe(struct platform_device *pdev)
 	if (rc < 0) {
 		pr_err("Couldn't register the interrupts rc = %d\n", rc);
 		goto exit;
+	}
+
+	bms->dc_suspend_votable = create_votable("DC_SUSPEND", VOTE_SET_ANY,
+					sw5100_dc_suspend_vote_callback,
+					bms);
+	if (IS_ERR(bms->dc_suspend_votable)) {
+		rc = PTR_ERR(bms->dc_suspend_votable);
+		bms->dc_suspend_votable = NULL;
+		return rc;
 	}
 
 	pr_info("SW5100 BMS driver probed successfully\n");
