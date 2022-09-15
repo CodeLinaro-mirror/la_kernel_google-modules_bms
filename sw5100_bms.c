@@ -185,7 +185,9 @@ enum sw5100_qbg_iio_channels {
 	SW5100_QBG_CYCLE_COUNT,
 	SW5100_QBG_CHARGE_FULL_DESIGN,
 	SW5100_QBG_TIME_TO_FULL_NOW,
+	SW5100_QBG_TIME_TO_EMPTY_AVG,
 	SW5100_QBG_VOLTAGE_AVG,
+	SW5100_QBG_VOLTAGE_OCV,
 	SW5100_QBG_MAX,
 };
 
@@ -204,7 +206,9 @@ static const char * const sw5100_qbg_ext_iio_chan[] = {
 	[SW5100_QBG_CYCLE_COUNT] = "cycle_count",
 	[SW5100_QBG_CHARGE_FULL_DESIGN] = "charge_full_design",
 	[SW5100_QBG_TIME_TO_FULL_NOW] = "time_to_full_now",
+	[SW5100_QBG_TIME_TO_EMPTY_AVG] = "time_to_empty_avg",
 	[SW5100_QBG_VOLTAGE_AVG] = "voltage_avg",
+	[SW5100_QBG_VOLTAGE_OCV] = "voltage_ocv",
 	[SW5100_QBG_CHARGE_FULL_DESIGN] = "charge_full_design",
 };
 
@@ -910,9 +914,17 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CYCLE_COUNT, &ivalue);
 		if (rc == 0)
 			pval->intval = ivalue;
+		/* TODO(b/243407602): fix cycle count, but for now set it to 0 as a workaround */
+		if (pval->intval < 0)
+			pval->intval = 0;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_AVG:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_VOLTAGE_AVG, &ivalue);
+		if (rc == 0)
+			pval->intval = ivalue;
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
+		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_VOLTAGE_OCV, &ivalue);
 		if (rc == 0)
 			pval->intval = ivalue;
 		break;
@@ -933,6 +945,11 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_TIME_TO_FULL_NOW, &ivalue);
+		if (rc == 0)
+			pval->intval = ivalue;
+		break;
+	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG:
+		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_TIME_TO_EMPTY_AVG, &ivalue);
 		if (rc == 0)
 			pval->intval = ivalue;
 		break;
@@ -1104,6 +1121,7 @@ static enum power_supply_property sw5100_psy_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,		/* compat */
 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_VOLTAGE_OCV,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
@@ -1111,6 +1129,7 @@ static enum power_supply_property sw5100_psy_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
+	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
 };
