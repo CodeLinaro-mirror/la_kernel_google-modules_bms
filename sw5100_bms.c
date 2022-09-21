@@ -38,6 +38,7 @@
 #define BIAS_STS_READY	BIT(0)
 
 #define CHARGE_DISABLE_VOTER	"charge_disable"
+#define USBIN_DISABLE_VOTER	"USBIN_DISABLE"
 
 struct bms_dev {
 	struct	device			*dev;
@@ -46,10 +47,12 @@ struct bms_dev {
 	struct	votable			*fv_votable;
 	struct	votable			*fcc_votable;
 	struct	votable			*dc_suspend_votable;
+	struct	votable			*icl_votable;
 	struct	notifier_block		nb;
 	int				batt_id_ohms;
 	u32				rradc_base;
 	int				chg_term_voltage;
+	int				chg_term_voltage_debounce;
 	struct iio_channel		*batt_therm_chan;
 	struct iio_channel		*batt_id_chan;
 	struct iio_channel		**iio_chan_list_qg;
@@ -114,6 +117,7 @@ struct bias_config {
 #define CHGR_CHARGE_CURRENT_STEP		25000
 
 #define CHG_TERM_VOLTAGE			4350
+#define CHG_TERM_VOLT_DEBOUNCE			200
 
 #define PM5100_ADC_CHG_ITERM_MULT		16384
 
@@ -585,6 +589,7 @@ static int sw5100_get_chg_status(const struct bms_dev *bms,
 	bool plugged, valid;
 	int rc, ret;
 	int vchrg = 0;
+	int vlimit = bms->chg_term_voltage;
 	u8 pstat, stat1, stat2;
 
 	rc = sw5100_rd8(bms->pmic_regmap, DCDC_POWER_PATH_STATUS_REG, &pstat);
@@ -623,12 +628,16 @@ static int sw5100_get_chg_status(const struct bms_dev *bms,
 	/* pause on FCC=0, JEITA, USB/DC suspend or on INPUT UV/OV */
 	case SW5100_PAUSE_CHARGE:
 	case SW5100_INHIBIT_CHARGE:
+		ret = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		break;
 	case SW5100_TERMINATE_CHARGE:
 		/* flag full only at the correct voltage */
 		rc = sw5100_get_battery_voltage(bms, &vchrg);
 		if (rc == 0)
 			vchrg = (vchrg / 1000);
-		if (vchrg < bms->chg_term_voltage)
+		if (stat1 == SW5100_TERMINATE_CHARGE)
+			vlimit -= bms->chg_term_voltage_debounce;
+		if (vchrg < vlimit)
 			ret = POWER_SUPPLY_STATUS_NOT_CHARGING;
 		else
 			ret = POWER_SUPPLY_STATUS_FULL;
@@ -686,7 +695,7 @@ static int sw5100_get_chg_chgr_state(const struct bms_dev *bms,
 		(void)sw5100_rd8(bms->pmic_regmap, DCDC_ICL_STATUS_REG, &icl);
 	}
 
-	chg_state->f.icl = (icl * 50);
+	chg_state->f.icl = (icl * 100);
 
 	pr_info("MSC_PCS chg_state=%lx [0x%x:%d:%d:%d:%d] chg=%c\n",
 		(unsigned long)chg_state->v,
@@ -980,6 +989,29 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 	return 0;
 }
 
+static int sw5100_usbin_disable(struct bms_dev *bms, bool disable)
+{
+	int rc;
+
+	if (!bms->icl_votable) {
+		bms->icl_votable = find_votable("USB_ICL");
+		if (bms->icl_votable == NULL) {
+			pr_err("USBIN_DISABLE: disable failed\n");
+			return -EINVAL;
+		}
+	}
+
+	rc = vote(bms->icl_votable, USBIN_DISABLE_VOTER, disable, 0);
+
+	pr_debug("USBIN_DISABLE : disable=%d, rc=%d)\n", disable, rc);
+
+	if (rc > 0) {
+		/* vote returns positive number on success */
+		rc = 0;
+	}
+	return rc;
+}
+
 static int sw5100_charge_disable(struct bms_dev *bms, bool disable)
 {
 	const u8 val = disable ? 0 : CHARGING_ENABLE_CMD_BIT;
@@ -987,6 +1019,14 @@ static int sw5100_charge_disable(struct bms_dev *bms, bool disable)
 
 	rc = sw5100_masked_write(bms->pmic_regmap, CHGR_CHG_EN, CHARGING_ENABLE_CMD_BIT, val);
 
+	if (!disable) {
+		/* Make sure charging is restarted by toggling usbin */
+		if (rc == 0)
+			rc = sw5100_usbin_disable(bms, true);
+		if (rc == 0)
+			rc = sw5100_usbin_disable(bms, false);
+
+	}
 	pr_debug("CHARGE_DISABLE : disable=%d -> val=%d (%d)\n", disable, val, rc);
 
 	return rc;
@@ -1052,6 +1092,8 @@ static int sw5100_psy_set_property(struct power_supply *psy,
 					rc = sw5100_charge_disable(bms, true);
 				if (rc == 0)
 					rc = sw5100_charge_disable(bms, false);
+				if (rc < 0)
+					pr_err("Failed to toggle charging during charging restart\n");
 			}
 		}
 
@@ -1206,6 +1248,10 @@ static int sw5100_parse_dt(struct bms_dev *bms)
 	ret = of_property_read_u32(node, "google,chg-term-voltage", &bms->chg_term_voltage);
 	if (ret < 0)
 		bms->chg_term_voltage = CHG_TERM_VOLTAGE;
+
+	ret = of_property_read_u32(node, "google,chg-term-voltage-debounce", &bms->chg_term_voltage_debounce);
+	if (ret < 0)
+		bms->chg_term_voltage_debounce = CHG_TERM_VOLT_DEBOUNCE;
 
 	ret = of_property_read_string(node, "google,psy-name", &psy_name);
 	if (ret == 0)
