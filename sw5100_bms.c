@@ -93,7 +93,7 @@ struct bias_config {
 #define CHGR_FAST_CHARGE_CURRENT_SETTING	0x2654
 #define CHGR_ADC_ITERM_UP_THD_MSB		0x2664
 #define CHGR_FLOAT_VOLTAGE_SETTING		0x2658
-#define CHGR_TERM_CFG_REG			0x2660
+#define CHGR_CHG_TERM_CFG_REG			0x2660
 #define CHGR_ITERM_USE_ANALOG_BIT		BIT(3)
 
 #define DCDC_ICL_STATUS_REG			0x2709
@@ -214,10 +214,9 @@ static const char * const sw5100_qbg_ext_iio_chan[] = {
 	[SW5100_QBG_TIME_TO_EMPTY_AVG] = "time_to_empty_avg",
 	[SW5100_QBG_VOLTAGE_AVG] = "voltage_avg",
 	[SW5100_QBG_VOLTAGE_OCV] = "voltage_ocv",
-	[SW5100_QBG_CHARGE_FULL_DESIGN] = "charge_full_design",
 };
 
-int sw5100_get_prop_from_bms(struct bms_dev *bms, int channel, int *val)
+static int sw5100_get_prop_from_bms(struct bms_dev *bms, int channel, int *val)
 {
 	int rc;
 
@@ -230,7 +229,7 @@ int sw5100_get_prop_from_bms(struct bms_dev *bms, int channel, int *val)
 	return rc < 0 ? rc : 0;
 }
 
-struct iio_channel **sw5100_get_ext_channels(struct device *dev,
+static struct iio_channel **sw5100_get_ext_channels(struct device *dev,
 		 const char *const *channel_map, int size)
 {
 	int i, rc = 0;
@@ -766,9 +765,9 @@ static int sw5100_get_batt_iterm(struct bms_dev *bms)
 	int rc, temp;
 	u8 stat, buf[2];
 
-	rc = sw5100_rd8(bms->pmic_regmap, CHGR_TERM_CFG_REG, &stat);
+	rc = sw5100_rd8(bms->pmic_regmap, CHGR_CHG_TERM_CFG_REG, &stat);
 	if (rc < 0) {
-		pr_err("Couldn't read CHGR_TERM_CFG_REG rc=%d\n", rc);
+		pr_err("Couldn't read CHGR_CHG_TERM_CFG_REG rc=%d\n", rc);
 		return rc;
 	}
 
@@ -822,7 +821,7 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 		return -EAGAIN;
 	}
 
-	switch (psp) {
+	switch ((int) psp) {
 	/*
 	 * called from power_supply_update_leds(), not using it on this
 	 * platform. Could return the state of the charge buck (BUCKEN)
@@ -973,7 +972,7 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_SERIAL_NUMBER:
-		pval->intval = "";
+		pval->strval = "";
 		break;
 	case GBMS_PROP_HEALTH_ACT_IMPEDANCE:
 		pval->intval = -EINVAL;
@@ -1045,14 +1044,6 @@ static int sw5100_charge_pause(struct bms_dev *bms, bool pause)
 	return rc;
 }
 
-#define CHGR_FAST_CHARGE_SAFETY_TIMER_CFG_REG	0x2690
-#define FAST_CHARGE_SAFETY_TIMER_EN_BIT		BIT(3)
-#define FAST_CHARGE_SAFETY_TIMER_MASK		GENMASK(1, 0)
-#define FAST_CHARGE_SAFETY_TIMER_192_MIN	0x0
-#define FAST_CHARGE_SAFETY_TIMER_384_MIN	0x1
-#define FAST_CHARGE_SAFETY_TIMER_768_MIN	0x2
-#define FAST_CHARGE_SAFETY_TIMER_1536_MIN	0x3
-
 static int sw5100_psy_set_property(struct power_supply *psy,
 				  enum power_supply_property psp,
 				  const union power_supply_propval *pval)
@@ -1062,7 +1053,7 @@ static int sw5100_psy_set_property(struct power_supply *psy,
 	int ivalue = 0;
 	int rc = 0;
 
-	switch (psp) {
+	switch ((int) psp) {
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		/*
 		 * CHGR_FAST_CHARGE_CURRENT_SETTING, 0x2654
@@ -1136,7 +1127,7 @@ static int sw5100_psy_set_property(struct power_supply *psy,
 static int sw5100_property_is_writeable(struct power_supply *psy,
 					enum power_supply_property psp)
 {
-	switch (psp) {
+	switch ((int) psp) {
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
@@ -1214,8 +1205,6 @@ static int sw5100_parse_dt_fg(struct bms_dev *bms, struct device_node *node)
 
 	int rc = 0;
 	u32 val;
-	struct device_node *batt_node;
-	struct device_node *profile_node;
 
 	rc = of_property_read_u32(node, "reg", &val);
 	if (rc < 0) {
