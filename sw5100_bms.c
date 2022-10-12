@@ -911,7 +911,7 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 		pval->intval = sw5100_get_batt_present(bms);
 		break;
 	case GBMS_PROP_CAPACITY_RAW:
-		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_REAL_CAPACITY, &ivalue);
+		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);
 		if (rc == 0)
 			pval->intval = ivalue << 8;
 		break;
