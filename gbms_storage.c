@@ -49,7 +49,7 @@ struct gbms_cache_entry {
 
 #define GBMS_PROVIDER_NAME_MAX	32
 
-#define GBMS_PROVIDERS_MAX	4
+#define GBMS_PROVIDERS_MAX	5
 static spinlock_t providers_lock;
 static bool gbms_storage_init_done;
 
@@ -504,24 +504,6 @@ static int gbms_storage_flush_all_internal(bool force)
 	return success ? 0 : -EIO;
 }
 
-int gbms_storage_flush(gbms_tag_t tag)
-{
-	unsigned long flags;
-
-	if (!gbms_storage_init_done)
-		return -EPROBE_DEFER;
-
-	spin_lock_irqsave(&providers_lock, flags);
-
-	/* TODO: search for the provider */
-
-	gbms_storage_flush_all_internal(false);
-	spin_unlock_irqrestore(&providers_lock, flags);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(gbms_storage_flush);
-
 int gbms_storage_flush_all(void)
 {
 	unsigned long flags;
@@ -612,6 +594,11 @@ static void gbms_show_storage_provider(struct seq_file *m,
 	gbms_tag_t tag;
 	int ret = 0, i;
 
+	if (!slot->dsc || !slot->dsc->iter) {
+		seq_printf(m, "?");
+		return;
+	}
+
 	for (i = 0 ; ret == 0; i++) {
 		ret = slot->dsc->iter(i, &tag, slot->ptr);
 		if (ret < 0)
@@ -644,11 +631,7 @@ static int gbms_show_storage_clients(struct seq_file *m, void *data)
 		seq_printf(m, gbms_providers[i].offline ? "%d (%s):" : "%d %s:",
 			   i, gbms_providers[i].name);
 
-		if (!gbms_providers[i].dsc || !gbms_providers[i].dsc->iter)
-			continue;
-
 		gbms_show_storage_provider(m, &gbms_providers[i], false);
-
 		seq_printf(m, "\n");
 	}
 
@@ -1118,7 +1101,7 @@ enum gbee_status {
 	GBEE_STATUS_OK,
 };
 
-#define GBEE_POLL_RETRIES	5
+#define GBEE_POLL_RETRIES	100
 #define GBEE_POLL_INTERVAL_MS	200
 
 /* only one battery eeprom for now */

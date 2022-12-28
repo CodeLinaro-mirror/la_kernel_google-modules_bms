@@ -518,7 +518,7 @@ int pca9468_get_charge_type(struct pca9468_charger *pca9468)
 		return POWER_SUPPLY_CHARGE_TYPE_FAST;
 	case DC_STATE_START_CV:
 	case DC_STATE_CV_MODE:
-		return POWER_SUPPLY_CHARGE_TYPE_TAPER;
+		return POWER_SUPPLY_CHARGE_TYPE_TAPER_EXT;
 	case DC_STATE_CHECK_ACTIVE: /* in preset */
 	case DC_STATE_CHARGING_DONE:
 		break;
@@ -600,7 +600,7 @@ int pca9468_get_chg_chgr_state(struct pca9468_charger *pca9468,
 	chg_state->f.chg_type = pca9468_get_charge_type(pca9468);
 	chg_state->f.flags = gbms_gen_chg_flags(chg_state->f.chg_status,
 						chg_state->f.chg_type);
-	chg_state->f.flags |= GBMS_CS_FLAG_NOCOMP;
+	chg_state->f.flags |= GBMS_CS_FLAG_DIRECT_CHG;
 
 	vchrg = pca9468_read_adc(pca9468, ADCCH_VBAT);
 	if (vchrg > 0)
@@ -672,10 +672,10 @@ void p9468_chg_stats_dump(const struct pca9468_charger *pca9468)
 	const struct p9468_chg_stats *chg_data = &pca9468->chg_data;
 
 	logbuffer_prlog(pca9468, LOGLEVEL_INFO,
-			"N: ovc=%d,ovc_ibatt=%d,ovc_delta=%d rcp=%d,stby=%d",
+			"N: ovc=%d,ovc_ibatt=%d,ovc_delta=%d rcp=%d,stby=%d,iin_loop=%d",
 			chg_data->ovc_count,
 			chg_data->ovc_max_ibatt, chg_data->ovc_max_delta,
-			chg_data->rcp_count, chg_data->stby_count);
+			chg_data->rcp_count, chg_data->stby_count, chg_data->iin_loop_count);
 	logbuffer_prlog(pca9468, LOGLEVEL_INFO,
 			"C: nc=%d,pre=%d,ca=%d,cc=%d,cv=%d,adj=%d\n",
 			chg_data->nc_count, chg_data->pre_count,

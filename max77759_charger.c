@@ -27,7 +27,6 @@
 #include <linux/thermal.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <misc/gvotable.h>
 #include <linux/platform_device.h>
 #include "gbms_power_supply.h"
 #include "google_bms.h"
@@ -117,6 +116,7 @@ static int max77759_resume_check(struct max77759_chgr_data *data)
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_GOOGLE_BCL)
 static int max77759_get_vdroop_ok(struct i2c_client *client, bool *state)
 {
 	struct max77759_chgr_data *data;
@@ -245,6 +245,7 @@ static const struct bcl_ifpmic_ops bcl_ifpmic_ops = {
 	max77759_set_batoilo_lvl,
 	max77759_get_batoilo_lvl,
 };
+#endif /* CONFIG_GOOGLE_BCL */
 
 /* ----------------------------------------------------------------------- */
 
@@ -588,6 +589,13 @@ static int max77759_foreach_callback(void *data, const char *reason,
 		pr_debug("%s: WLC_TX vote=%x\n", __func__, mode);
 		cb_data->wlc_tx += 1;
 		break;
+	/* pogo vout */
+	case GBMS_CHGR_MODE_VOUT:
+		if (!cb_data->pogo_vout)
+			cb_data->reason = reason;
+		pr_debug("%s: VOUT vote=%x\n", __func__, mode);
+		cb_data->pogo_vout += 1;
+		break;
 
 	default:
 		pr_err("mode=%x not supported\n", mode);
@@ -637,7 +645,10 @@ static int max77759_get_otg_usecase(struct max77759_foreach_cb_data *cb_data)
 	}
 
 	/* pure OTG defaults to ext boost */
-	if (!cb_data->wlc_rx && !cb_data->wlc_tx) {
+	if (cb_data->pogo_vout) {
+		usecase = GSU_MODE_USB_OTG_POGO_VOUT;
+		mode = MAX77759_CHGR_MODE_OTG_BOOST_ON;
+	} else if (!cb_data->wlc_rx && !cb_data->wlc_tx) {
 		/* 5-1: USB_OTG or  5-2: USB_OTG_FRS */
 
 		if (cb_data->frs_on) {
@@ -694,12 +705,6 @@ static int max77759_get_usecase(struct max77759_foreach_cb_data *cb_data,
 			return -EINVAL;
 		}
 
-		if (dc_on) {
-			pr_warn("%s: no wlc_tx with dc_on for now\n", __func__);
-			/* TODO: GSU_MODE_USB_DC_WLC_TX */
-			wlc_tx = 0;
-		}
-
 		if (uc_data->ext_otg_only && cb_data->otg_on) {
 			pr_warn("%s: no wlc_tx with otg_on for now\n", __func__);
 			wlc_tx = 0;
@@ -724,6 +729,19 @@ static int max77759_get_usecase(struct max77759_foreach_cb_data *cb_data,
 		/* USB+WLC for factory and testing */
 		usecase = GSU_MODE_USB_WLC_RX;
 		mode = MAX77759_CHGR_MODE_CHGR_BUCK_ON;
+	} else if (cb_data->pogo_vout) {
+
+		if (!buck_on) {
+			mode = MAX77759_CHGR_MODE_ALL_OFF;
+			usecase = GSU_MODE_POGO_VOUT;
+		} else if (chgr_on) {
+			mode = MAX77759_CHGR_MODE_CHGR_BUCK_ON;
+			usecase = GSU_MODE_USB_CHG_POGO_VOUT;
+		} else {
+			mode = MAX77759_CHGR_MODE_BUCK_ON;
+			usecase = GSU_MODE_USB_CHG_POGO_VOUT;
+		}
+
 	} else if (!buck_on && !wlc_rx) {
 		mode = MAX77759_CHGR_MODE_ALL_OFF;
 
@@ -736,14 +754,10 @@ static int max77759_get_usecase(struct max77759_foreach_cb_data *cb_data,
 		dc_on = false;
 	} else if (wlc_tx) {
 
+		/* Disable DC when Rtx is on will handle by dc_avail_votable */
 		if (!buck_on) {
 			mode = MAX77759_CHGR_MODE_ALL_OFF;
 			usecase = GSU_MODE_WLC_TX;
-		} else if (dc_on) {
-			/* TODO: turn off DC and run off MW */
-			pr_err("WLC_TX+DC is not supported yet\n");
-			mode = MAX77759_CHGR_MODE_ALL_OFF;
-			usecase = GSU_MODE_USB_DC;
 		} else if (chgr_on) {
 			mode = MAX77759_CHGR_MODE_CHGR_BUCK_ON;
 			usecase = GSU_MODE_USB_CHG_WLC_TX;
@@ -801,6 +815,12 @@ static int max77759_get_usecase(struct max77759_foreach_cb_data *cb_data,
 
 	}
 
+	if (!cb_data->dc_avail_votable)
+		cb_data->dc_avail_votable = gvotable_election_get_handle(VOTABLE_DC_CHG_AVAIL);
+	if (cb_data->dc_avail_votable)
+		gvotable_cast_int_vote(cb_data->dc_avail_votable,
+				       "WLC_TX", wlc_tx? 0 : 1, wlc_tx);
+
 	/* reg might be ignored later */
 	cb_data->reg = _chg_cnfg_00_cp_en_set(cb_data->reg, dc_on);
 	cb_data->reg = _chg_cnfg_00_mode_set(cb_data->reg, mode);
@@ -834,6 +854,7 @@ static int max77759_set_insel(struct max77759_chgr_data *data,
 		 * input_suspend masks both inputs but must still allow
 		 * TODO: use a separate use case for usb + wlc
 		 */
+		 force_wlc = true;
 	} else if (cb_data->buck_on && !cb_data->chgin_off) {
 		insel_value |= MAX77759_CHG_CNFG_12_CHGINSEL;
 	} else if (cb_data->wlc_rx && !cb_data->wlcin_off) {
@@ -859,12 +880,21 @@ static int max77759_set_insel(struct max77759_chgr_data *data,
 		force_wlc = true;
 	}
 
-	/* always disable USB when Dock is present */
-	if (uc_data->dcin_is_dock && max77759_wcin_is_valid(data) && !cb_data->wlcin_off) {
-		insel_value &= ~MAX77759_CHG_CNFG_12_CHGINSEL;
-		/* b/202767016: charge over pogo, set to high */
+	if (cb_data->pogo_vout) {
+		/* always disable WCIN when pogo power out */
+		insel_value &= ~MAX77759_CHG_CNFG_12_WCINSEL;
+		/* turn off pogo_ovp */
 		if (uc_data->pogo_ovp_en > 0)
-			gpio_set_value_cansleep(uc_data->pogo_ovp_en, 1);
+			gpio_set_value_cansleep(uc_data->pogo_ovp_en, uc_data->pogo_ovp_en_act_low);
+	} else if (uc_data->dcin_is_dock && max77759_wcin_is_valid(data) && !cb_data->wlcin_off) {
+		/* always disable USB when Dock is present */
+		insel_value &= ~MAX77759_CHG_CNFG_12_CHGINSEL;
+		/* b/232723240: charge over USB-C
+		 *              set to 1 for POGO_OVP_EN
+		 *              set to 0 for POGO_OVP_EN_L
+		 */
+		if (uc_data->pogo_ovp_en > 0)
+			gpio_set_value_cansleep(uc_data->pogo_ovp_en, !uc_data->pogo_ovp_en_act_low);
 		insel_value |= MAX77759_CHG_CNFG_12_WCINSEL;
 	}
 
@@ -1015,6 +1045,10 @@ static int max77759_mode_callback(struct gvotable_election *el,
 	cb_data.wlc_rx = max77759_wcin_is_online(data) &&
 			 !data->wcin_input_suspend;
 	cb_data.wlcin_off = !!data->wcin_input_suspend;
+
+	pr_debug("%s: wcin_is_online=%d data->wcin_input_suspend=%d\n", __func__,
+		  max77759_wcin_is_online(data), data->wcin_input_suspend);
+
 	/* now scan all the reasons, accumulate in cb_data */
 	gvotable_election_for_each(el, max77759_foreach_callback, &cb_data);
 
@@ -1022,7 +1056,7 @@ static int max77759_mode_callback(struct gvotable_election *el,
 	       !cb_data.chgr_on && !cb_data.buck_on && ! cb_data.boost_on &&
 	       !cb_data.otg_on && !cb_data.uno_on && !cb_data.wlc_tx &&
 	       !cb_data.wlc_rx && !cb_data.wlcin_off && !cb_data.chgin_off &&
-	       !cb_data.usb_wlc;
+	       !cb_data.usb_wlc && !cb_data.pogo_vout;
 	if (nope) {
 		pr_debug("%s: nope callback\n", __func__);
 		goto unlock_done;
@@ -1030,12 +1064,12 @@ static int max77759_mode_callback(struct gvotable_election *el,
 
 	dev_info(data->dev, "%s:%s full=%d raw=%d stby_on=%d, dc_on=%d, chgr_on=%d, buck_on=%d,"
 		" boost_on=%d, otg_on=%d, uno_on=%d wlc_tx=%d wlc_rx=%d usb_wlc=%d"
-		" chgin_off=%d wlcin_off=%d frs_on=%d\n",
+		" chgin_off=%d wlcin_off=%d frs_on=%d pogo_vout=%d\n",
 		__func__, trigger ? trigger : "<>",
 		data->charge_done, cb_data.use_raw, cb_data.stby_on, cb_data.dc_on,
 		cb_data.chgr_on, cb_data.buck_on, cb_data.boost_on, cb_data.otg_on,
 		cb_data.uno_on, cb_data.wlc_tx, cb_data.wlc_rx, cb_data.usb_wlc,
-		cb_data.chgin_off, cb_data.wlcin_off, cb_data.frs_on);
+		cb_data.chgin_off, cb_data.wlcin_off, cb_data.frs_on, cb_data.pogo_vout);
 
 	/* just use raw "as is", no changes to switches etc */
 	if (cb_data.use_raw) {
@@ -1066,6 +1100,29 @@ static int max77759_mode_callback(struct gvotable_election *el,
 		if (use_case < 0) {
 			dev_err(data->dev, "no valid use case %d\n", use_case);
 			goto unlock_done;
+		}
+
+		dev_dbg(data->dev, "fccm_reset=%d data->otg_changed=%d cb_data.otg_on=%d\n",
+			data->otg_fccm_reset, data->otg_changed, cb_data.otg_on);
+
+		/* re-set FCCM mode for OTG */
+		if (data->otg_fccm_reset && data->otg_changed != cb_data.otg_on) {
+			data->otg_changed = cb_data.otg_on;
+			/*
+			 * cb_data.otg_on is disabled in max77759_get_usecase
+			 * for GSU_MODE_USB_OTG_WLC_DC.
+			 */
+			if (cb_data.otg_on) {
+				schedule_delayed_work(&data->otg_fccm_worker,
+						      msecs_to_jiffies(0));
+			} else {
+				cancel_delayed_work_sync(&data->otg_fccm_worker);
+
+				/* Force to reset the FCCM mode to disable */
+				if (data->uc_data.ext_bst_mode > 0)
+					gpio_set_value_cansleep(data->uc_data.ext_bst_mode, 0);
+				__pm_relax(data->otg_fccm_wake_lock);
+			}
 		}
 	}
 
@@ -1193,6 +1250,7 @@ static int max77759_set_charge_enabled(struct max77759_chgr_data *data,
 				       int enabled, const char *reason)
 {
 	/* ->charge_done is reset in max77759_enable_sw_recharge() */
+	pr_debug("%s %s enabled=%d\n", __func__, reason, enabled);
 
 	return gvotable_cast_long_vote(data->mode_votable, reason,
 				       GBMS_CHGR_MODE_CHGR_BUCK_ON, enabled);
@@ -1219,12 +1277,17 @@ static int max77759_set_charge_disable(struct max77759_chgr_data *data,
 static int max77759_chgin_input_suspend(struct max77759_chgr_data *data,
 					bool enabled, const char *reason)
 {
+	const int old_value = data->chgin_input_suspend;
 	int ret;
 
+	pr_debug("%s enabled=%d->%d reason=%s\n", __func__,
+		 data->wcin_input_suspend, enabled, reason);
+
+	data->chgin_input_suspend = enabled; /* the callback might use this */
 	ret = gvotable_cast_long_vote(data->mode_votable, "CHGIN_SUSP",
 				      GBMS_CHGR_MODE_CHGIN_OFF, enabled);
-	if (ret == 0)
-		data->chgin_input_suspend = enabled; /* cache */
+	if (ret < 0)
+		data->chgin_input_suspend = old_value; /* restored */
 
 	return ret;
 }
@@ -1232,12 +1295,17 @@ static int max77759_chgin_input_suspend(struct max77759_chgr_data *data,
 static int max77759_wcin_input_suspend(struct max77759_chgr_data *data,
 				       bool enabled, const char *reason)
 {
+	const int old_value = data->wcin_input_suspend;
 	int ret;
 
-	ret = gvotable_cast_long_vote(data->mode_votable, "WCIN_SUSP",
+	pr_debug("%s enabled=%d->%d reason=%s\n", __func__,
+		 data->wcin_input_suspend, enabled, reason);
+
+	data->wcin_input_suspend = enabled; /* the callback uses this!  */
+	ret = gvotable_cast_long_vote(data->mode_votable, reason,
 				      GBMS_CHGR_MODE_WLCIN_OFF, enabled);
-	if (ret == 0)
-		data->wcin_input_suspend = enabled; /* cache */
+	if (ret < 0)
+		data->wcin_input_suspend = old_value; /* restore */
 
 	return ret;
 }
@@ -1511,6 +1579,7 @@ static int max77759_dcicl_callback(struct gvotable_election *el,
 	pr_debug("%s: DC_ICL reason=%s, value=%ld suspend=%d\n",
 		 __func__, reason ? reason : "", (long)value, suspend);
 
+	/* doesn't trigger a CHARGER_MODE */
 	ret = max77759_wcin_set_ilim_max_ua(data, dc_icl);
 	if (ret < 0)
 		dev_err(data->dev, "cannot set dc_icl=%d (%d)\n",
@@ -1848,7 +1917,7 @@ static int max77759_get_charge_type(struct max77759_chgr_data *data)
 		return POWER_SUPPLY_CHARGE_TYPE_FAST;
 	case CHGR_DTLS_FAST_CHARGE_CONST_VOLTAGE_MODE:
 	case CHGR_DTLS_TOP_OFF_MODE:
-		return POWER_SUPPLY_CHARGE_TYPE_TAPER;
+		return POWER_SUPPLY_CHARGE_TYPE_TAPER_EXT;
 
 	case CHGR_DTLS_DONE_MODE:
 	case CHGR_DTLS_TIMER_FAULT_MODE:
@@ -2114,6 +2183,9 @@ static int max77759_psy_set_property(struct power_supply *psy,
 		pr_debug("%s: topoff_current=%d (%d)\n",
 			__func__, pval->intval, ret);
 		break;
+	case GBMS_PROP_TAPER_CONTROL:
+		ret = 0;
+		break;
 	default:
 		break;
 	}
@@ -2198,7 +2270,9 @@ static int max77759_psy_get_property(struct power_supply *psy,
 		if (rc < 0)
 			pval->intval = rc;
 		break;
-
+	case GBMS_PROP_TAPER_CONTROL:
+		ret = 0;
+		break;
 	default:
 		pr_debug("property (%d) unsupported.\n", psp);
 		ret = -EINVAL;
@@ -2219,6 +2293,7 @@ static int max77759_psy_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 	case GBMS_PROP_CHARGE_DISABLE:
 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
+	case GBMS_PROP_TAPER_CONTROL:
 		return 1;
 	default:
 		break;
@@ -2868,6 +2943,44 @@ static int max77759_init_bcl(struct max77759_chgr_data *data)
 }
 #endif
 
+static void max77759_otg_fccm_worker(struct work_struct *work)
+{
+	struct max77759_chgr_data *data = container_of(work,
+						struct max77759_chgr_data,
+						otg_fccm_worker.work);
+	int gpio_en, vbatt, ret;
+
+	__pm_stay_awake(data->otg_fccm_wake_lock);
+
+	if (data->uc_data.ext_bst_mode <= 0)
+		goto done_relax;
+
+	ret = max77759_read_vbatt(data, &vbatt);
+	if (ret < 0) {
+		schedule_delayed_work(&data->otg_fccm_worker, msecs_to_jiffies(50));
+		goto done_relax;
+        }
+
+	vbatt = vbatt / 1000;
+	gpio_en = gpio_get_value_cansleep(data->uc_data.ext_bst_mode);
+
+	dev_dbg(data->dev, "fccm: vbatt=%d, gpio_en=%d\n", vbatt, gpio_en);
+
+	if (vbatt > data->otg_fccm_vbatt_upperbd && !gpio_en) {
+		dev_info(data->dev, "enable fccm mode.\n");
+		gpio_set_value_cansleep(data->uc_data.ext_bst_mode, 1);
+	} else if (vbatt < data->otg_fccm_vbatt_lowerbd && gpio_en) {
+		dev_info(data->dev, "disable fccm mode.\n");
+		gpio_set_value_cansleep(data->uc_data.ext_bst_mode, 0);
+	}
+
+	schedule_delayed_work(&data->otg_fccm_worker, msecs_to_jiffies(30000));
+done_relax:
+	__pm_relax(data->otg_fccm_wake_lock);
+}
+
+#define MAX77759_FCCM_UPPERBD_VOL 4400
+#define MAX77759_FCCM_LOWERBD_VOL 3600
 static int max77759_charger_probe(struct i2c_client *client,
 				  const struct i2c_device_id *id)
 {
@@ -3002,6 +3115,29 @@ static int max77759_charger_probe(struct i2c_client *client,
 
 	mutex_unlock(&data->io_lock);
 
+	data->otg_fccm_wake_lock = wakeup_source_register(NULL, "max77759-otg_fccm");
+	if (!data->otg_fccm_wake_lock)
+		pr_err("Failed to register otg_fccm wakeup source\n");
+
+	ret = of_property_read_u32(dev->of_node,
+				   "max77759,otg-fccm-vbatt-upperbd",
+				   &data->otg_fccm_vbatt_upperbd);
+	if (ret == 0)
+		ret = of_property_read_u32(dev->of_node,
+					   "max77759,otg-fccm-vbatt-lowerbd",
+					   &data->otg_fccm_vbatt_lowerbd);
+	data->otg_changed = false;
+	data->otg_fccm_reset = ret == 0 &&
+		data->otg_fccm_vbatt_upperbd > data->otg_fccm_vbatt_lowerbd &&
+		data->otg_fccm_vbatt_upperbd < MAX77759_FCCM_UPPERBD_VOL &&
+		data->otg_fccm_vbatt_lowerbd > MAX77759_FCCM_LOWERBD_VOL;
+	if (data->otg_fccm_reset)
+		dev_info(dev, "fccm_reset enabled lo=%dmV hi=%dmV\n",
+			 data->otg_fccm_vbatt_lowerbd,
+			 data->otg_fccm_vbatt_upperbd);
+
+	INIT_DELAYED_WORK(&data->otg_fccm_worker, max77759_otg_fccm_worker);
+
 	ret = of_property_read_u32(dev->of_node, "max77759,chg-term-voltage",
 				   &data->chg_term_voltage);
 	if (ret < 0)
@@ -3053,6 +3189,7 @@ static int max77759_charger_remove(struct i2c_client *client)
 	if (data->de)
 		debugfs_remove(data->de);
 	wakeup_source_unregister(data->usecase_wake_lock);
+	wakeup_source_unregister(data->otg_fccm_wake_lock);
 
 	return 0;
 }
@@ -3094,7 +3231,11 @@ static int max77759_charger_pm_resume(struct device *dev)
 		enable_irq(data->irq_int);
 		data->irq_disabled = false;
 	}
+
 	pm_runtime_put_sync(data->dev);
+
+	if ((data->otg_fccm_reset) && (data->otg_changed))
+		mod_delayed_work(system_wq, &data->otg_fccm_worker, 0);
 
 	return 0;
 }

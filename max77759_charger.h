@@ -4,7 +4,9 @@
  *
  */
 
+#if IS_ENABLED(CONFIG_GOOGLE_BCL)
 #include <soc/google/bcl.h>
+#endif
 #include "gs101_usecase.h"
 
 #ifndef MAX77759_CHARGER_H_
@@ -54,6 +56,14 @@ struct max77759_chgr_data {
 	int fship_dtls;
 	bool online;
 	bool wden;
+
+	/* Force to change FCCM mode during OTG at high battery voltage */
+	bool otg_changed;
+	bool otg_fccm_reset;
+	int otg_fccm_vbatt_lowerbd;
+	int otg_fccm_vbatt_upperbd;
+	struct delayed_work otg_fccm_worker;
+	struct wakeup_source *otg_fccm_wake_lock;
 
 	/* debug interface, register to read or write */
 	u32 debug_reg_address;

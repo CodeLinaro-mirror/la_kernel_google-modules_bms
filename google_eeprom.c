@@ -22,6 +22,8 @@
 #define BATT_EEPROM_TAG_BGPN_LEN	GBMS_BGPN_LEN
 #define BATT_EEPROM_TAG_BRID_OFFSET	0x17
 #define BATT_EEPROM_TAG_BRID_LEN	1
+#define BATT_EEPROM_TAG_MYMD_OFFSET	0x1A
+#define BATT_EEPROM_TAG_MYMD_LEN	BATT_EEPROM_TAG_XYMD_LEN
 #define BATT_EEPROM_TAG_STRD_OFFSET	0x1E
 #define BATT_EEPROM_TAG_STRD_LEN	12
 #define BATT_EEPROM_TAG_RSOC_OFFSET	0x2A
@@ -43,7 +45,19 @@
 
 #define BATT_EEPROM_TAG_HIST_OFFSET	0x5E
 #define BATT_EEPROM_TAG_HIST_LEN	BATT_ONE_HIST_LEN
+#define BATT_TOTAL_HIST_LEN		(BATT_ONE_HIST_LEN * BATT_MAX_HIST_CNT)
 
+#define BATT_EEPROM_TAG_EXTRA_START	(BATT_EEPROM_TAG_HIST_OFFSET + BATT_TOTAL_HIST_LEN)
+
+// 0x3E2 is the first free with 75 history entries
+#define BATT_EEPROM_TAG_AYMD_OFFSET	0x3E5
+#define BATT_EEPROM_TAG_AYMD_LEN	BATT_EEPROM_TAG_XYMD_LEN
+#define BATT_EEPROM_TAG_GCFE_OFFSET	0x3E8
+#define BATT_EEPROM_TAG_GCFE_LEN	2
+#define BATT_EEPROM_TAG_RAVG_OFFSET	0x3EA
+#define BATT_EEPROM_TAG_RAVG_LEN	2
+#define BATT_EEPROM_TAG_RFCN_OFFSET	0x3EC
+#define BATT_EEPROM_TAG_RFCN_LEN	2
 #define BATT_EEPROM_TAG_DINF_OFFSET	0x3EE
 #define BATT_EEPROM_TAG_DINF_LEN	GBMS_DINF_LEN
 #define BATT_EEPROM_TAG_THAS_OFFSET	0x3FE
@@ -121,9 +135,29 @@ int gbee_storage_info(gbms_tag_t tag, size_t *addr, size_t *count, void *ptr)
 		*addr = BATT_EEPROM_TAG_ACIM_OFFSET;
 		*count = BATT_EEPROM_TAG_ACIM_LEN;
 		break;
+	case GBMS_TAG_GCFE:
+		*addr = BATT_EEPROM_TAG_GCFE_OFFSET;
+		*count = BATT_EEPROM_TAG_GCFE_LEN;
+		break;
+	case GBMS_TAG_RAVG:
+		*addr = BATT_EEPROM_TAG_RAVG_OFFSET;
+		*count = BATT_EEPROM_TAG_RAVG_LEN;
+		break;
+	case GBMS_TAG_RFCN:
+		*addr = BATT_EEPROM_TAG_RFCN_OFFSET;
+		*count = BATT_EEPROM_TAG_RFCN_LEN;
+		break;
 	case GBMS_TAG_THAS:
 		*addr = BATT_EEPROM_TAG_THAS_OFFSET;
 		*count = BATT_EEPROM_TAG_THAS_LEN;
+		break;
+	case GBMS_TAG_AYMD:
+		*addr = BATT_EEPROM_TAG_AYMD_OFFSET;
+		*count = BATT_EEPROM_TAG_AYMD_LEN;
+		break;
+	case GBMS_TAG_MYMD:
+		*addr = BATT_EEPROM_TAG_MYMD_OFFSET;
+		*count = BATT_EEPROM_TAG_MYMD_LEN;
 		break;
 	default:
 		ret = -ENOENT;
@@ -142,7 +176,10 @@ static int gbee_storage_iter(int index, gbms_tag_t *tag, void *ptr)
 					   GBMS_TAG_CNHS, GBMS_TAG_SELC,
 					   GBMS_TAG_CELC, GBMS_TAG_LOTR,
 					   GBMS_TAG_STRD, GBMS_TAG_RSOC,
-					   GBMS_TAG_ACIM, GBMS_TAG_THAS };
+					   GBMS_TAG_ACIM, GBMS_TAG_GCFE,
+					   GBMS_TAG_RAVG, GBMS_TAG_RFCN,
+					   GBMS_TAG_THAS, GBMS_TAG_AYMD,
+					   GBMS_TAG_MYMD};
 	const int count = ARRAY_SIZE(keys);
 
 	if (index < 0 || index >= count)
@@ -188,6 +225,31 @@ static int gbee_storage_read(gbms_tag_t tag, void *buff, size_t size, void *ptr)
 	return ret;
 }
 
+static bool gbee_storage_is_writable(gbms_tag_t tag)
+{
+	switch (tag) {
+	case GBMS_TAG_DINF:
+	case GBMS_TAG_GMSR:
+	case GBMS_TAG_BCNT:
+	case GBMS_TAG_CNHS:
+	case GBMS_TAG_SELC:
+	case GBMS_TAG_CELC:
+	case GBMS_TAG_BPST:
+	case GBMS_TAG_STRD:
+	case GBMS_TAG_RSOC:
+	case GBMS_TAG_ACIM:
+	case GBMS_TAG_GCFE:
+	case GBMS_TAG_RAVG:
+	case GBMS_TAG_RFCN:
+	case GBMS_TAG_THAS:
+	case GBMS_TAG_AYMD:
+		return true;
+	default:
+		return false;
+	}
+
+}
+
 static int gbee_storage_write(gbms_tag_t tag, const void *buff, size_t size,
 			      void *ptr)
 {
@@ -195,12 +257,7 @@ static int gbee_storage_write(gbms_tag_t tag, const void *buff, size_t size,
 	size_t offset = 0, len = 0;
 	int ret, write_size = 0;
 
-	if ((tag != GBMS_TAG_DINF) && (tag != GBMS_TAG_GMSR) &&
-	    (tag != GBMS_TAG_BCNT) && (tag != GBMS_TAG_CNHS) &&
-	    (tag != GBMS_TAG_SELC) && (tag != GBMS_TAG_CELC) &&
-	    (tag != GBMS_TAG_BPST) && (tag != GBMS_TAG_STRD) &&
-	    (tag != GBMS_TAG_RSOC) && (tag != GBMS_TAG_ACIM) &&
-	    (tag != GBMS_TAG_THAS))
+	if (!gbee_storage_is_writable(tag))
 		return -ENOENT;
 
 	ret = GBEE_STORAGE_INFO(tag, &offset, &len, ptr);

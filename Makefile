@@ -93,6 +93,15 @@ obj-$(CONFIG_MAX20339)	+= max20339.o
 #SW5100 BMS
 obj-$(CONFIG_GOOGLE_BMS_SW5100) += sw5100_bms.o
 
+# WLC98 Wireless charging
+obj-$(CONFIG_STWLC98)	+= wlc98_driver.o
+
+# WC68 DC Charge pump
+obj-$(CONFIG_STWC68)	+= wc68.o
+wc68-objs += wc68_driver.o
+wc68-objs += wc68_gbms_pps.o
+wc68-objs += google_dc_pps.o
+
 # prevent warnings
 WENUMS=-Wno-enum-conversion -Wno-switch
 
@@ -109,15 +118,20 @@ CFLAGS_google_bms.o += -Wno-enum-conversion
 CFLAGS_google_cpm.o += $(WENUMS)
 CFLAGS_google_dual_batt_gauge.o += $(WENUMS)
 CFLAGS_google_dock.o += $(WENUMS)
+CFLAGS_wc68_driver.o += $(WENUMS)
+CFLAGS_wc68_gbms_pps.o += $(WENUMS)
 
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 M ?= $(shell pwd)
 
+subdir-ccflags-y += \
+		-I$(KERNEL_SRC)/../private/google-modules/bms \
 
 KBUILD_OPTIONS += $(foreach m,$(GBMS_MODULES),CONFIG_$(m)=m )
 
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/drivers/power/supply/qcom
-EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE $(foreach m,$(GBMS_MODULES),-DCONFIG_$(m)_MODULE)
+EXTRA_CFLAGS += -DDYNAMIC_DEBUG_MODULE
+EXTRA_CFLAGS += $(foreach m,$(GBMS_MODULES),-DCONFIG_$(m)_MODULE)
 EXTRA_CFLAGS	+= -DCONFIG_DISABLE_GOOGLE_DC_PPS
 
 modules:
@@ -125,8 +139,12 @@ modules:
 		EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
 		$(@)
 
-modules_install clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) $(@)
+EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/bms/misc/Module.symvers
+include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+
+modules modules_install clean:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \
+	$(KBUILD_OPTIONS) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" $(@)
 
 print-%:
 	@echo $* = $($*)
