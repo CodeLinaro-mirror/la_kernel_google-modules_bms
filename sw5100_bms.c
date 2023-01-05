@@ -572,7 +572,7 @@ static int sw5100_get_chg_type(const struct bms_dev *bms)
 		chg_type = POWER_SUPPLY_CHARGE_TYPE_FAST;
 		break;
 	case SW5100_TAPER_CHARGE:
-		chg_type = POWER_SUPPLY_CHARGE_TYPE_TAPER;
+		chg_type = POWER_SUPPLY_CHARGE_TYPE_TAPER_EXT;
 		break;
 	default:
 		chg_type = POWER_SUPPLY_CHARGE_TYPE_NONE;

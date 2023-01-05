@@ -125,7 +125,7 @@ KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 M ?= $(shell pwd)
 
 subdir-ccflags-y += \
-		-I$(KERNEL_SRC)/../private/google-modules/bms \
+		-I$(KERNEL_SRC)/../google-modules/bms \
 
 KBUILD_OPTIONS += $(foreach m,$(GBMS_MODULES),CONFIG_$(m)=m )
 
@@ -139,8 +139,9 @@ modules:
 		EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
 		$(@)
 
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/bms/misc/Module.symvers
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+EXTRA_SYMBOLS += $(OUT_DIR)/../google-modules/bms/misc/Module.symvers
+EXTRA_SYMBOLS += $(OUT_DIR)/../msm-google/drivers/power/supply/qcom/Module.symvers
+include $(KERNEL_SRC)/../google-modules/soc/msm/Makefile.include
 
 modules modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \
