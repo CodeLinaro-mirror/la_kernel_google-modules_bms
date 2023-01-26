@@ -35,6 +35,7 @@
 #include "smblite-lib.h"
 #include "smb5-iio.h"
 
+#define CAPACITY_OFFSET 5
 #define BIAS_STS_READY	BIT(0)
 
 #define CHARGE_DISABLE_VOTER	"charge_disable"
@@ -805,6 +806,22 @@ static int sw5100_get_batt_present(struct bms_dev *bms)
 	return ret;
 }
 
+/** Given a SOC percentage aka capacity we're going to scale 5-100 to 0-100. */
+static int scale_capacity(int capacity)
+{
+#if defined(CAPACITY_OFFSET) && CAPACITY_OFFSET > 0 && CAPACITY_OFFSET < 100
+	if (capacity > 100) {
+		return 100;
+	} else if (capacity >= CAPACITY_OFFSET) {
+		return (((capacity - CAPACITY_OFFSET) * 100) / (100 - CAPACITY_OFFSET));
+	} else {
+		return 0;
+	}
+#else
+	return capacity;
+#endif
+}
+
 static int sw5100_psy_get_property(struct power_supply *psy,
 				       enum power_supply_property psp,
 				       union power_supply_propval *pval)
@@ -912,12 +929,12 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 	case GBMS_PROP_CAPACITY_RAW:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);
 		if (rc == 0)
-			pval->intval = ivalue << 8;
+			pval->intval = (scale_capacity(ivalue) << 8);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);
 		if (rc == 0)
-			pval->intval = ivalue;
+			pval->intval = scale_capacity(ivalue);
 		break;
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CYCLE_COUNT, &ivalue);
