@@ -69,6 +69,12 @@ config GOOGLE_BEE
 	  The EEPROM contains the battery type, lifetime data and other
 	  infomation.
 
+config GOOGLE_BMS_VIRT_STORAGE
+	tristate "GBMS Virtual Storage"
+	help
+	  Say Y here to enable support for virtualized google battery
+	  management storage.
+
 config DISABLE_GOOGLE_DC_PPS
 	tristate "Disable PPS support"
 	depends on GOOGLE_CHARGER

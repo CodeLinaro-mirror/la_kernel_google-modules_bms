@@ -5,11 +5,12 @@
 GBMS_MODULES =	GOOGLE_BMS \
 		GOOGLE_BATTERY \
 		GOOGLE_CHARGER \
-		GOOGLE_BMS_SW5100 \
+		GOOGLE_BMS_SW5100
 
 obj-$(CONFIG_GOOGLE_BMS)	+= google-bms.o
 google-bms-objs += google_bms.o
 google-bms-objs += gbms_storage.o
+
 # TODO(166536889): enable bee only on the devices supporting it. This will
 # require a change in the API since right now storage call into eeprom that
 # calls back into storage.
@@ -92,6 +93,8 @@ obj-$(CONFIG_MAX20339)	+= max20339.o
 
 #SW5100 BMS
 obj-$(CONFIG_GOOGLE_BMS_SW5100) += sw5100_bms.o
+
+obj-$(CONFIG_GOOGLE_BMS_VIRT_STORAGE) += gbms_virt_storage.o
 
 # WLC98 Wireless charging
 obj-$(CONFIG_STWLC98)	+= wlc98_driver.o
