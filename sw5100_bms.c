@@ -994,6 +994,9 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 	case GBMS_PROP_HEALTH_ACT_IMPEDANCE:
 		pval->intval = -EINVAL;
 		break;
+	case GBMS_PROP_RESISTANCE:
+		pval->intval = 0;
+		break;
 	default:
 		pr_debug("getting unsupported property: %d\n", psp);
 		return -EINVAL;
