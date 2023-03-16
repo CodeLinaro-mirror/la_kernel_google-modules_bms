@@ -114,6 +114,9 @@ struct bias_config {
 
 #define CHGR_BATTERY_CHARGER_STATUS_MASK	GENMASK(2, 0)
 
+#define CHGR_USB_SUSPEND			0x2954
+#define USBIN_SUSPEND BIT(0)
+
 #define CHGR_FLOAT_VOLTAGE_BASE			3600000
 #define CHGR_CHARGE_CURRENT_STEP		25000
 
@@ -591,6 +594,7 @@ static int sw5100_get_chg_status(const struct bms_dev *bms,
 	int vchrg = 0;
 	int vlimit = bms->chg_term_voltage;
 	u8 pstat, stat1, stat2;
+	u8 suspend;
 
 	rc = sw5100_rd8(bms->pmic_regmap, DCDC_POWER_PATH_STATUS_REG, &pstat);
 	if (rc < 0)
@@ -644,7 +648,14 @@ static int sw5100_get_chg_status(const struct bms_dev *bms,
 		break;
 	/* disabled disconnect */
 	case SW5100_DISABLE_CHARGE:
-		ret = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		rc = sw5100_rd8(bms->pmic_regmap, CHGR_USB_SUSPEND, &suspend);
+		if (rc < 0)
+			return POWER_SUPPLY_STATUS_UNKNOWN;
+		if ((suspend & USBIN_SUSPEND) == USBIN_SUSPEND) {
+			ret = POWER_SUPPLY_STATUS_DISCHARGING;
+		} else {
+			ret = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		}
 		break;
 	default:
 		ret = POWER_SUPPLY_STATUS_UNKNOWN;
