@@ -17,6 +17,7 @@
 #define __P9221_CHARGER_H__
 
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/crc8.h>
 #include <misc/gvotable.h>
 #include "gbms_power_supply.h"
@@ -567,22 +568,20 @@ struct p9221_charger_cc_data_lock {
 };
 
 struct p9221_charger_platform_data {
-	int				irq_gpio;
+	struct gpio_desc		*irq_gpio;
 	int				irq_int;
-	int				irq_det_gpio;
+	struct gpio_desc		*irq_det_gpio;
 	int				irq_det_int;
-	int				qien_gpio;
-	int				slct_gpio;
+	struct gpio_desc		*qien_gpio;
+	struct gpio_desc		*slct_gpio;
 	int				slct_value;
-	int				ben_gpio;
-	int                             ext_ben_gpio;
-	int				switch_gpio;
-	int				boost_gpio;
-	int				dc_switch_gpio;
-	int				qi_vbus_en;
-	int				qi_vbus_en_act_low;
-	int				wlc_en;
-	int				wlc_en_act_low;
+	struct gpio_desc		*ben_gpio;
+	struct gpio_desc		*ext_ben_gpio;
+	struct gpio_desc		*switch_gpio;
+	struct gpio_desc		*boost_gpio;
+	struct gpio_desc		*dc_switch_gpio;
+	struct gpio_desc		*qi_vbus_en;
+	struct gpio_desc		*wlc_en;
 	int				max_vout_mv;
 	int				epp_vout_mv;
 	u8				fod[P9221R5_NUM_FOD];
@@ -857,7 +856,7 @@ bool p9xxx_is_capdiv_en(struct p9221_charger_data *charger);
 int p9221_wlc_disable(struct p9221_charger_data *charger, int disable, u8 reason);
 int p9221_set_auth_dc_icl(struct p9221_charger_data *charger, bool enable);
 int p9xxx_sw_ramp_icl(struct p9221_charger_data *charger, const int icl_target);
-int p9xxx_gpio_set_value(struct p9221_charger_data *charger, unsigned gpio, int value);
+int p9xxx_gpio_set_value(struct p9221_charger_data *charger, struct gpio_desc *gpio, int value);
 
 void p9xxx_gpio_init(struct p9221_charger_data *charger);
 extern int p9221_chip_init_funcs(struct p9221_charger_data *charger,

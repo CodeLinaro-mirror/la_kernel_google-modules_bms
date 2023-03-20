@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/pm.h>
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -1863,13 +1864,13 @@ int p9221_chip_init_funcs(struct p9221_charger_data *chgr, u16 chip_id)
 }
 
 #if IS_ENABLED(CONFIG_GPIOLIB)
-int p9xxx_gpio_set_value(struct p9221_charger_data *chgr, unsigned gpio, int value)
+int p9xxx_gpio_set_value(struct p9221_charger_data *chgr, struct gpio_desc *gpio, int value)
 {
-	if (gpio <= 0)
+	if (!gpio)
 		return -EINVAL;
 
-	logbuffer_log(chgr->log, "%s: set gpio %d to %d\n", __func__, gpio, value);
-	gpio_set_value_cansleep(gpio, value);
+	logbuffer_log(chgr->log, "%s: set gpio %d to %d\n", __func__, desc_to_gpio(gpio), value);
+	gpiod_set_value_cansleep(gpio, value);
 
 	return 0;
 }
@@ -1932,10 +1933,9 @@ static void p9xxx_gpio_set(struct gpio_chip *chip, unsigned int offset, int valu
 			ret = charger->chip_set_vout_max(charger, P9412_BPP_VOUT_DFLT);
 		break;
 	case P9XXX_GPIO_VBUS_EN:
-		if (charger->pdata->wlc_en < 0)
+		if (IS_ERR_OR_NULL(charger->pdata->wlc_en))
 			break;
-		value = (!!value) ^ charger->pdata->wlc_en_act_low;
-		gpio_direction_output(charger->pdata->wlc_en, value);
+		gpiod_direction_output(charger->pdata->wlc_en, value);
 		break;
 	case P9XXX_GPIO_DC_SW_EN:
 		ret = p9xxx_gpio_set_value(charger, charger->pdata->dc_switch_gpio, value);
