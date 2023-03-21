@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright 2020 Google, LLC
+ * Copyright 2020,2023 Google, LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -1194,6 +1194,7 @@ static int max77729_pmic_probe(struct i2c_client *client,
 	struct device *dev = &client->dev;
 	struct max77729_pmic_data *data;
 	int irq_gpio, pmic_id, ret =0;
+	struct device_node *dn;
 
 	pmic_id = max77729_pmic_read_id(client);
 	if (pmic_id < 0)
@@ -1311,10 +1312,10 @@ static int max77729_pmic_probe(struct i2c_client *client,
 		data->gpio.ngpio = MAX77759_NUM_GPIOS;
 		data->gpio.can_sleep = true;
 		data->gpio.base	= -1;
-		data->gpio.of_node = of_find_node_by_name(dev->of_node,
-							  data->gpio.label);
-		if (!data->gpio.of_node)
+		dn = of_find_node_by_name(dev->of_node, data->gpio.label);
+		if (!dn)
 			dev_err(dev, "Failed to find %s DT node\n", data->gpio.label);
+		data->gpio.fwnode = of_node_to_fwnode(dn);
 
 		/* check regmap-irq */
 		girq->chip = &max77729_gpio_irq_chip;
