@@ -32,7 +32,6 @@ struct max77759_chgr_data {
 	bool wcin_input_suspend;
 	bool thm2_sts;
 
-	int irq_gpio;
 	int irq_int;
 	bool irq_disabled;
 

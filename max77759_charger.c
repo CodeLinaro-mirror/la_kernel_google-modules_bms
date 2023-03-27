@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright 2020-2022 Google LLC
+ * Copyright 2020-2023 Google LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,13 +16,14 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/ctype.h>
+#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/regmap.h>
 #include <linux/thermal.h>
 #include <linux/debugfs.h>
@@ -2992,6 +2993,7 @@ static int max77759_charger_probe(struct i2c_client *client,
 	struct max77759_chgr_data *data;
 	struct regmap *regmap;
 	const char *tmp;
+	struct gpio_desc *irq_gpio;
 	u32 usb_otg_mv;
 	int ret = 0;
 	u8 ping;
@@ -3059,11 +3061,12 @@ static int max77759_charger_probe(struct i2c_client *client,
 
 	INIT_DELAYED_WORK(&data->mode_rerun_work, max77759_mode_rerun_work);
 
-	data->irq_gpio = of_get_named_gpio(dev->of_node, "max77759,irq-gpio", 0);
-	if (data->irq_gpio < 0) {
-		dev_err(dev, "failed get irq_gpio\n");
+	irq_gpio = devm_gpiod_get(dev, "max77759,irq", GPIOD_ASIS);
+	if (IS_ERR(irq_gpio)) {
+		dev_err(dev, "failed get irq_gpio: %ld\n",
+			PTR_ERR(irq_gpio));
 	} else {
-		client->irq = gpio_to_irq(data->irq_gpio);
+		client->irq = gpiod_to_irq(irq_gpio);
 
 		ret = devm_request_threaded_irq(data->dev, client->irq, NULL,
 						max77759_chgr_irq,
