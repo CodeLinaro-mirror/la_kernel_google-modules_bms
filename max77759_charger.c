@@ -888,8 +888,9 @@ static int max77759_set_insel(struct max77759_chgr_data *data,
 		/* always disable WCIN when pogo power out */
 		insel_value &= ~MAX77759_CHG_CNFG_12_WCINSEL;
 		/* turn off pogo_ovp */
-		if (uc_data->pogo_ovp_en > 0)
-			gpio_set_value_cansleep(uc_data->pogo_ovp_en, uc_data->pogo_ovp_en_act_low);
+		if (!IS_ERR_OR_NULL(uc_data->pogo_ovp_en))
+			gpiod_set_raw_value_cansleep(uc_data->pogo_ovp_en,
+						     uc_data->pogo_ovp_en_act_low);
 	} else if (uc_data->dcin_is_dock && max77759_wcin_is_valid(data) && !cb_data->wlcin_off) {
 		/* always disable USB when Dock is present */
 		insel_value &= ~MAX77759_CHG_CNFG_12_CHGINSEL;
@@ -897,8 +898,9 @@ static int max77759_set_insel(struct max77759_chgr_data *data,
 		 *              set to 1 for POGO_OVP_EN
 		 *              set to 0 for POGO_OVP_EN_L
 		 */
-		if (uc_data->pogo_ovp_en > 0)
-			gpio_set_value_cansleep(uc_data->pogo_ovp_en, !uc_data->pogo_ovp_en_act_low);
+		if (!IS_ERR_OR_NULL(uc_data->pogo_ovp_en))
+			gpiod_set_raw_value_cansleep(uc_data->pogo_ovp_en,
+						     !uc_data->pogo_ovp_en_act_low);
 		insel_value |= MAX77759_CHG_CNFG_12_WCINSEL;
 	}
 
@@ -952,11 +954,24 @@ static int max77759_set_usecase(struct max77759_chgr_data *data,
 
 	/* Need this only for for usecases that control the switches */
 	if (!uc_data->init_done) {
-		uc_data->init_done = gs101_setup_usecases(uc_data, data->dev->of_node);
+		uc_data->init_done = gs101_setup_usecases(uc_data, data->dev->of_node, data->dev);
 
 		dev_info(data->dev, "bst_on:%d, bst_sel:%d, ext_bst_ctl:%d lsw1_o:%d lsw1_c:%d\n",
-			 uc_data->bst_on, uc_data->bst_sel, uc_data->ext_bst_ctl,
-			 uc_data->lsw1_is_open, uc_data->lsw1_is_closed);
+			 (IS_ERR_OR_NULL(uc_data->bst_on)
+			  ? (int)PTR_ERR(uc_data->bst_on)
+			  : desc_to_gpio(uc_data->bst_on)),
+			 (IS_ERR_OR_NULL(uc_data->bst_sel)
+			  ? (int)PTR_ERR(uc_data->bst_sel)
+			  : desc_to_gpio(uc_data->bst_sel)),
+			 (IS_ERR_OR_NULL(uc_data->ext_bst_ctl)
+			  ? (int)PTR_ERR(uc_data->ext_bst_ctl)
+			  : desc_to_gpio(uc_data->ext_bst_ctl)),
+			 (IS_ERR_OR_NULL(uc_data->lsw1_is_open)
+			  ? (int)PTR_ERR(uc_data->lsw1_is_open)
+			  : desc_to_gpio(uc_data->lsw1_is_open)),
+			 (IS_ERR_OR_NULL(uc_data->lsw1_is_closed)
+			  ? (int)PTR_ERR(uc_data->lsw1_is_closed)
+			  : desc_to_gpio(uc_data->lsw1_is_closed)));
 	}
 
 	/* always fix/adjust insel (solves multiple input_suspend) */
@@ -1086,7 +1101,8 @@ static int max77759_mode_callback(struct gvotable_election *el,
 		/* insel needs it, otg usecases needs it */
 		if (!uc_data->init_done) {
 			uc_data->init_done = gs101_setup_usecases(uc_data,
-						data->dev->of_node);
+								  data->dev->of_node,
+								  data->dev);
 			gs101_dump_usecasase_config(uc_data);
 		}
 
@@ -1094,8 +1110,8 @@ static int max77759_mode_callback(struct gvotable_election *el,
 		 * force FRS if ext boost or NBC is not enabled
 		 * TODO: move to setup_usecase
 		 */
-		use_internal_bst = uc_data->vin_is_valid < 0 &&
-				   uc_data->bst_on < 0;
+		use_internal_bst = IS_ERR(uc_data->vin_is_valid) &&
+				   IS_ERR(uc_data->bst_on);
 		if (cb_data.otg_on && use_internal_bst)
 			cb_data.frs_on = cb_data.otg_on;
 
@@ -1123,8 +1139,8 @@ static int max77759_mode_callback(struct gvotable_election *el,
 				cancel_delayed_work_sync(&data->otg_fccm_worker);
 
 				/* Force to reset the FCCM mode to disable */
-				if (data->uc_data.ext_bst_mode > 0)
-					gpio_set_value_cansleep(data->uc_data.ext_bst_mode, 0);
+				if (!IS_ERR(data->uc_data.ext_bst_mode))
+					gpiod_set_value_cansleep(data->uc_data.ext_bst_mode, 0);
 				__pm_relax(data->otg_fccm_wake_lock);
 			}
 		}
@@ -2956,7 +2972,7 @@ static void max77759_otg_fccm_worker(struct work_struct *work)
 
 	__pm_stay_awake(data->otg_fccm_wake_lock);
 
-	if (data->uc_data.ext_bst_mode <= 0)
+	if (IS_ERR_OR_NULL(data->uc_data.ext_bst_mode))
 		goto done_relax;
 
 	ret = max77759_read_vbatt(data, &vbatt);
@@ -2966,16 +2982,16 @@ static void max77759_otg_fccm_worker(struct work_struct *work)
         }
 
 	vbatt = vbatt / 1000;
-	gpio_en = gpio_get_value_cansleep(data->uc_data.ext_bst_mode);
+	gpio_en = gpiod_get_value_cansleep(data->uc_data.ext_bst_mode);
 
 	dev_dbg(data->dev, "fccm: vbatt=%d, gpio_en=%d\n", vbatt, gpio_en);
 
 	if (vbatt > data->otg_fccm_vbatt_upperbd && !gpio_en) {
 		dev_info(data->dev, "enable fccm mode.\n");
-		gpio_set_value_cansleep(data->uc_data.ext_bst_mode, 1);
+		gpiod_set_value_cansleep(data->uc_data.ext_bst_mode, 1);
 	} else if (vbatt < data->otg_fccm_vbatt_lowerbd && gpio_en) {
 		dev_info(data->dev, "disable fccm mode.\n");
-		gpio_set_value_cansleep(data->uc_data.ext_bst_mode, 0);
+		gpiod_set_value_cansleep(data->uc_data.ext_bst_mode, 0);
 	}
 
 	schedule_delayed_work(&data->otg_fccm_worker, msecs_to_jiffies(30000));
@@ -3056,7 +3072,7 @@ static int max77759_charger_probe(struct i2c_client *client,
 	}
 
 	/* CHARGER_MODE needs this (initialized to -EPROBE_DEFER) */
-	gs101_setup_usecases(&data->uc_data, NULL);
+	gs101_setup_usecases(&data->uc_data, NULL, dev);
 	data->uc_data.client = client;
 
 	INIT_DELAYED_WORK(&data->mode_rerun_work, max77759_mode_rerun_work);
