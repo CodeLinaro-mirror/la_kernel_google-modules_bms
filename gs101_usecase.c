@@ -1372,21 +1372,21 @@ bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 
 	/* control external boost if present */
 	if (uc_data->bst_on == -EPROBE_DEFER)
-		uc_data->bst_on = of_get_named_gpio(node, "max77759,bst-on", 0);
+		uc_data->bst_on = of_get_named_gpio(node, "max77759,bst-on-gpio", 0);
 	if (uc_data->bst_sel == -EPROBE_DEFER)
-		uc_data->bst_sel = of_get_named_gpio(node, "max77759,bst-sel", 0);
+		uc_data->bst_sel = of_get_named_gpio(node, "max77759,bst-sel-gpio", 0);
 	if (uc_data->ext_bst_ctl == -EPROBE_DEFER)
 		uc_data->ext_bst_ctl = of_get_named_gpio(node, "max77759,extbst-ctl", 0);
 
 	/* for enabling charging over pogo */
 	if (uc_data->pogo_ovp_en == -EPROBE_DEFER) {
-		uc_data->pogo_ovp_en = of_get_named_gpio_flags(node, "max77759,pogo-ovp-en", 0,
+		uc_data->pogo_ovp_en = of_get_named_gpio_flags(node, "max77759,pogo-ovp-en-gpio", 0,
 							       &flags);
 		if (uc_data->pogo_ovp_en >= 0)
 			uc_data->pogo_ovp_en_act_low = (flags & OF_GPIO_ACTIVE_LOW) ? 1 : 0;
 	}
 	if (uc_data->pogo_vout_en == -EPROBE_DEFER) {
-		uc_data->pogo_vout_en = of_get_named_gpio(node, "max77759,pogo-vout-sw-en", 0);
+		uc_data->pogo_vout_en = of_get_named_gpio(node, "max77759,pogo-vout-sw-en-gpio", 0);
 
 		if (uc_data->pogo_vout_en >= 0)
 			gpio_set_value_cansleep(uc_data->pogo_vout_en, 0);
@@ -1394,41 +1394,42 @@ bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 
 	/* NBC workaround */
 	if (uc_data->vin_is_valid == -EPROBE_DEFER)
-		uc_data->vin_is_valid = of_get_named_gpio(node, "max77759,vin-is_valid", 0);
+		uc_data->vin_is_valid = of_get_named_gpio(node, "max77759,vin-is_valid-gpio", 0);
 	if (uc_data->lsw1_is_closed == -EPROBE_DEFER)
-		uc_data->lsw1_is_closed = of_get_named_gpio(node, "max77759,lsw1-is_closed", 0);
+		uc_data->lsw1_is_closed = of_get_named_gpio(node,
+							    "max77759,lsw1-is_closed-gpio", 0);
 	if (uc_data->lsw1_is_open == -EPROBE_DEFER)
-		uc_data->lsw1_is_open = of_get_named_gpio(node, "max77759,lsw1-is_open", 0);
+		uc_data->lsw1_is_open = of_get_named_gpio(node, "max77759,lsw1-is_open-gpio", 0);
 
 	/* all OTG cases, change INOVLO */
 	if (uc_data->otg_enable == -EPROBE_DEFER)
-		uc_data->otg_enable = of_get_named_gpio(node, "max77759,otg-enable", 0);
+		uc_data->otg_enable = of_get_named_gpio(node, "max77759,otg-enable-gpio", 0);
 
 	/*  wlc_rx: disable when chgin, CPOUT is safe */
 	if (uc_data->wlc_en == -EPROBE_DEFER)
-		uc_data->wlc_en = of_get_named_gpio(node, "max77759,wlc-en", 0);
+		uc_data->wlc_en = of_get_named_gpio(node, "max77759,wlc-en-gpio", 0);
 	if (uc_data->wlc_vbus_en == -EPROBE_DEFER)
-		uc_data->wlc_vbus_en = of_get_named_gpio(node, "max77759,wlc-vbus_en", 0);
+		uc_data->wlc_vbus_en = of_get_named_gpio(node, "max77759,wlc-vbus_en-gpio", 0);
 	/*  wlc_rx -> wlc_rx+otg disable cpout */
 	if (uc_data->cpout_en == -EPROBE_DEFER)
-		uc_data->cpout_en = of_get_named_gpio(node, "max77759,cpout-en", 0);
+		uc_data->cpout_en = of_get_named_gpio(node, "max77759,cpout-en-gpio", 0);
 	/* to 5.2V in p9412 */
 	if (uc_data->cpout_ctl == -EPROBE_DEFER)
-		uc_data->cpout_ctl = of_get_named_gpio(node, "max77759,cpout-ctl", 0);
+		uc_data->cpout_ctl = of_get_named_gpio(node, "max77759,cpout-ctl-gpio", 0);
 	/* ->wlc_tx disable 2:1 cpout */
 	if (uc_data->cpout21_en == -EPROBE_DEFER)
-		uc_data->cpout21_en = of_get_named_gpio(node, "max77759,cpout_21-en", 0);
+		uc_data->cpout21_en = of_get_named_gpio(node, "max77759,cpout_21-en-gpio", 0);
 
 	if (uc_data->ls1_en == -EPROBE_DEFER)
-		uc_data->ls1_en = of_get_named_gpio(node, "max77759,ls1-en", 0);
+		uc_data->ls1_en = of_get_named_gpio(node, "max77759,ls1-en-gpio", 0);
 	if (uc_data->ls2_en == -EPROBE_DEFER)
-		uc_data->ls2_en = of_get_named_gpio(node, "max77759,ls2-en", 0);
+		uc_data->ls2_en = of_get_named_gpio(node, "max77759,ls2-en-gpio", 0);
 	/* OTG+RTXL: IN-OUT switch of AO37 (forced always) */
 	if (uc_data->sw_en == -EPROBE_DEFER)
-		uc_data->sw_en = of_get_named_gpio(node, "max77759,sw-en", 0);
+		uc_data->sw_en = of_get_named_gpio(node, "max77759,sw-en-gpio", 0);
 	/* OPTIONAL: only in P1.1+ (TPS61372) */
 	if (uc_data->ext_bst_mode == -EPROBE_DEFER)
-		uc_data->ext_bst_mode = of_get_named_gpio(node, "max77759,extbst-mode", 0);
+		uc_data->ext_bst_mode = of_get_named_gpio(node, "max77759,extbst-mode-gpio", 0);
 
 	/* OPTIONAL: support wlc_rx -> wlc_rx+otg */
 	uc_data->rx_otg_en = of_property_read_bool(node, "max77759,rx-to-rx-otg-en");
@@ -1441,7 +1442,7 @@ bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 	uc_data->wlc_otg_extbst_en = of_property_read_bool(node, "max77759,wlc-otg-extbst-en");
 
 	if (uc_data->dc_sw_gpio == -EPROBE_DEFER)
-		uc_data->dc_sw_gpio = of_get_named_gpio(node, "max77759,gpio_dc_switch", 0);
+		uc_data->dc_sw_gpio = of_get_named_gpio(node, "max77759,gpio_dc_switch-gpio", 0);
 
 	return gs101_setup_usecases_done(uc_data);
 }
