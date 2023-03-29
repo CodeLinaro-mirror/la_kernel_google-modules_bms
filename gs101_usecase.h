@@ -17,7 +17,6 @@ struct max77759_usecase_data {
 	bool rx_otg_en;				/* enable WLC_RX -> WLC_RX + OTG case */
 	bool ext_otg_only;			/* use external OTG only */
 	struct gpio_desc *pogo_ovp_en;		/* pogo ovp */
-	bool pogo_ovp_en_act_low;		/* pogo ovp flags */
 	struct gpio_desc *pogo_vout_en;		/* pogo 5V vout */
 
 	struct gpio_desc *ls2_en;		/* OVP LS2, rtx case */

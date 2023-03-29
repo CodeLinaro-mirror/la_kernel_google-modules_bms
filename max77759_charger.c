@@ -888,19 +888,16 @@ static int max77759_set_insel(struct max77759_chgr_data *data,
 		/* always disable WCIN when pogo power out */
 		insel_value &= ~MAX77759_CHG_CNFG_12_WCINSEL;
 		/* turn off pogo_ovp */
-		if (!IS_ERR_OR_NULL(uc_data->pogo_ovp_en))
-			gpiod_set_raw_value_cansleep(uc_data->pogo_ovp_en,
-						     uc_data->pogo_ovp_en_act_low);
+		if (!IS_ERR(uc_data->pogo_ovp_en))
+			gpiod_set_value_cansleep(uc_data->pogo_ovp_en, 0);
 	} else if (uc_data->dcin_is_dock && max77759_wcin_is_valid(data) && !cb_data->wlcin_off) {
 		/* always disable USB when Dock is present */
 		insel_value &= ~MAX77759_CHG_CNFG_12_CHGINSEL;
 		/* b/232723240: charge over USB-C
-		 *              set to 1 for POGO_OVP_EN
-		 *              set to 0 for POGO_OVP_EN_L
+		 *              turn on pogo_ovp
 		 */
-		if (!IS_ERR_OR_NULL(uc_data->pogo_ovp_en))
-			gpiod_set_raw_value_cansleep(uc_data->pogo_ovp_en,
-						     !uc_data->pogo_ovp_en_act_low);
+		if (!IS_ERR(uc_data->pogo_ovp_en))
+			gpiod_set_value_cansleep(uc_data->pogo_ovp_en, 1);
 		insel_value |= MAX77759_CHG_CNFG_12_WCINSEL;
 	}
 

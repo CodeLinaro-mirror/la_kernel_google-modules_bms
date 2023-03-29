@@ -1246,12 +1246,10 @@ int gs101_to_usecase(struct max77759_usecase_data *uc_data, int use_case)
 		if (from_uc == GSU_MODE_USB_CHG_POGO_VOUT)
 			ret = gs101_pogo_vout_enable(uc_data, false);
 		/* b/232723240: charge over USB-C
-		 *              set to 0 for POGO_OVP_EN
-		 *              set to 1 for POGO_OVP_EN_L
+		 *              disable line
 		 */
 		if (!IS_ERR(uc_data->pogo_ovp_en))
-			gpiod_set_raw_value_cansleep(uc_data->pogo_ovp_en,
-						     uc_data->pogo_ovp_en_act_low);
+			gpiod_set_value_cansleep(uc_data->pogo_ovp_en, 0);
 		break;
 	case GSU_MODE_USB_WLC_RX:
 	case GSU_RAW_MODE:
@@ -1407,12 +1405,9 @@ bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 		uc_data->ext_bst_ctl = devm_gpiod_get(dev, "max77759,extbst-ctl", GPIOD_ASIS);
 
 	/* for enabling charging over pogo */
-	if (PTR_ERR(uc_data->pogo_ovp_en) == -EPROBE_DEFER) {
+	if (PTR_ERR(uc_data->pogo_ovp_en) == -EPROBE_DEFER)
 		uc_data->pogo_ovp_en = devm_gpiod_get_optional(dev, "max77759,pogo-ovp-en",
 							       GPIOD_ASIS);
-		if (!IS_ERR(uc_data->pogo_ovp_en))
-			uc_data->pogo_ovp_en_act_low = !!gpiod_is_active_low(uc_data->pogo_ovp_en);
-	}
 	if (PTR_ERR(uc_data->pogo_vout_en) == -EPROBE_DEFER) {
 		uc_data->pogo_vout_en = devm_gpiod_get_optional(dev, "max77759,pogo-vout-sw-en",
 								GPIOD_ASIS);
