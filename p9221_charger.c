@@ -5716,7 +5716,7 @@ static int p9221_parse_dt(struct device *dev,
 	}
 
 	/* QI_EN_L: enable/disable WLC chip */
-	ret = of_get_named_gpio(node, "idt,gpio_qien", 0);
+	ret = of_get_named_gpio(node, "idt,qien-gpio", 0);
 	pdata->qien_gpio = ret;
 	if (ret < 0)
 		dev_warn(dev, "unable to read idt,gpio_qien from dt: %d\n",
@@ -5728,7 +5728,7 @@ static int p9221_parse_dt(struct device *dev,
 	 * QI_USB_VBUS_EN: control the priority of USB and WLC,
 	 *                 set to high after boot
 	 */
-	ret = of_get_named_gpio_flags(node, "idt,gpio_qi_vbus_en", 0, &flags);
+	ret = of_get_named_gpio_flags(node, "idt,qi_vbus_en-gpio", 0, &flags);
 	pdata->qi_vbus_en = ret;
 	if (ret < 0) {
 		dev_warn(dev, "unable to read idt,gpio_qi_vbus_en from dt: %d\n",
@@ -5740,7 +5740,7 @@ static int p9221_parse_dt(struct device *dev,
 	}
 
 	/* Enable/Disable WLC chip(for P9XXX_GPIO_VBUS_EN) */
-	ret = of_get_named_gpio_flags(node, "idt,gpio_wlc_en", 0, &flags);
+	ret = of_get_named_gpio_flags(node, "idt,wlc_en-gpio", 0, &flags);
 	pdata->wlc_en = ret;
 	if (ret < 0) {
 		dev_warn(dev, "unable to read idt,gpio_wlc_en from dt: %d\n",
@@ -5751,7 +5751,7 @@ static int p9221_parse_dt(struct device *dev,
 	}
 
 	/* WLC_BPP_EPP_SLCT */
-	ret = of_get_named_gpio(node, "idt,gpio_slct", 0);
+	ret = of_get_named_gpio(node, "idt,slct-gpio", 0);
 	pdata->slct_gpio = ret;
 	if (ret < 0) {
 		dev_warn(dev, "unable to read idt,gpio_slct from dt: %d\n",
@@ -5776,14 +5776,14 @@ static int p9221_parse_dt(struct device *dev,
 	dev_info(dev, "has_rtx:%d\n", pdata->has_rtx);
 
 	/* boost enable, power WLC IC from device */
-	ret = of_get_named_gpio(node, "idt,gpio_ben", 0);
+	ret = of_get_named_gpio(node, "idt,ben-gpio", 0);
 	if (ret == -EPROBE_DEFER)
 		return ret;
 	pdata->ben_gpio = ret;
 	if (ret >= 0)
 		dev_info(dev, "ben gpio:%d\n", pdata->ben_gpio);
 
-	ret = of_get_named_gpio(node, "idt,gpio_switch", 0);
+	ret = of_get_named_gpio(node, "idt,switch-gpio", 0);
 	if (ret == -EPROBE_DEFER)
 		return ret;
 	pdata->switch_gpio = ret;
@@ -5791,7 +5791,7 @@ static int p9221_parse_dt(struct device *dev,
 		dev_info(dev, "switch gpio:%d\n", pdata->switch_gpio);
 
 	/* boost gpio sets rtx at charging voltage level */
-	ret = of_get_named_gpio(node, "idt,gpio_boost", 0);
+	ret = of_get_named_gpio(node, "idt,boost-gpio", 0);
 	if (ret == -EPROBE_DEFER)
 		return ret;
 	pdata->boost_gpio = ret;
@@ -5801,7 +5801,7 @@ static int p9221_parse_dt(struct device *dev,
 	/* configure boost to 7V through wlc chip */
 	pdata->apbst_en = of_property_read_bool(node, "idt,apbst_en");
 
-	ret = of_get_named_gpio(node, "idt,gpio_extben", 0);
+	ret = of_get_named_gpio(node, "idt,extben-gpio", 0);
 	if (ret == -EPROBE_DEFER)
 		return ret;
 	pdata->ext_ben_gpio = ret;
@@ -5811,7 +5811,7 @@ static int p9221_parse_dt(struct device *dev,
 	}
 
 	/* DC-PPS */
-	ret = of_get_named_gpio(node, "idt,gpio_dc_switch", 0);
+	ret = of_get_named_gpio(node, "idt,dc_switch-gpio", 0);
 	if (ret == -EPROBE_DEFER)
 		return ret;
 	pdata->dc_switch_gpio = ret;
@@ -5826,7 +5826,7 @@ static int p9221_parse_dt(struct device *dev,
 	dev_info(dev, "has_wlc_dc:%d\n", pdata->has_wlc_dc);
 
 	/* Main IRQ */
-	ret = of_get_named_gpio(node, "idt,irq_gpio", 0);
+	ret = of_get_named_gpio(node, "idt,irq-gpio", 0);
 	if (ret < 0) {
 		dev_err(dev, "unable to read idt,irq_gpio from dt: %d\n", ret);
 		return ret;
@@ -5837,7 +5837,7 @@ static int p9221_parse_dt(struct device *dev,
 		 pdata->irq_int);
 
 	/* Optional Detect IRQ */
-	ret = of_get_named_gpio(node, "idt,irq_det_gpio", 0);
+	ret = of_get_named_gpio(node, "idt,irq_det-gpio", 0);
 	pdata->irq_det_gpio = ret;
 	if (ret < 0) {
 		dev_warn(dev, "unable to read idt,irq_det_gpio from dt: %d\n",
