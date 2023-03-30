@@ -171,7 +171,7 @@ static int gs101_ls_mode(struct max77759_usecase_data *uc_data, int mode)
 	case 0:
 		/* the OVP open right away */
 		ret = gpiod_get_value_cansleep(uc_data->lsw1_is_open);
-		if (ret <= 0 && (!IS_ERR_OR_NULL(uc_data->ls1_en))) {
+		if (ret <= 0 && !IS_ERR_OR_NULL(uc_data->ls1_en)) {
 			const int max_count = 3;
 			int loops;
 
@@ -896,7 +896,8 @@ static int gs101_wlctx_otg_en(struct max77759_usecase_data *uc_data, bool enable
 
 	if (enable) {
 		/* this should be already set */
-		gpiod_set_value_cansleep(uc_data->sw_en, 1);
+		if (!IS_ERR(uc_data->sw_en))
+			gpiod_set_value_cansleep(uc_data->sw_en, 1);
 
 		ret = gs101_otg_update_ilim(uc_data, true);
 		if (ret < 0)
