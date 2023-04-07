@@ -2998,8 +2998,7 @@ done_relax:
 
 #define MAX77759_FCCM_UPPERBD_VOL 4400
 #define MAX77759_FCCM_LOWERBD_VOL 3600
-static int max77759_charger_probe(struct i2c_client *client,
-				  const struct i2c_device_id *id)
+static int max77759_charger_probe(struct i2c_client *client)
 {
 	struct power_supply_config chgr_psy_cfg = { 0 };
 	struct device *dev = &client->dev;
@@ -3274,7 +3273,7 @@ static struct i2c_driver max77759_charger_i2c_driver = {
 #endif
 	},
 	.id_table = max77759_id,
-	.probe    = max77759_charger_probe,
+	.probe_new = max77759_charger_probe,
 	.remove   = max77759_charger_remove,
 };
 

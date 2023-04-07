@@ -5826,8 +5826,7 @@ void *max1720x_get_model_data(struct i2c_client *client)
 	return chip ? chip->model_data : NULL;
 }
 
-static int max1720x_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int max1720x_probe(struct i2c_client *client)
 {
 	struct max1720x_chip *chip;
 	struct device *dev = &client->dev;
@@ -6081,7 +6080,7 @@ static struct i2c_driver max1720x_i2c_driver = {
 		   .probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		   },
 	.id_table = max1720x_id,
-	.probe = max1720x_probe,
+	.probe_new = max1720x_probe,
 	.remove = max1720x_remove,
 };
 

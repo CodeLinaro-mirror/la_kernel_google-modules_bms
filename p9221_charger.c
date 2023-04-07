@@ -6294,8 +6294,7 @@ static void p9221_fg_work(struct work_struct *work)
 		p9221_set_capacity(charger, prop.intval);
 }
 
-static int p9221_charger_probe(struct i2c_client *client,
-				const struct i2c_device_id *id)
+static int p9221_charger_probe(struct i2c_client *client)
 {
 	struct device_node *dn, *of_node = client->dev.of_node;
 	struct p9221_charger_data *charger;
@@ -6758,7 +6757,7 @@ static struct i2c_driver p9221_charger_driver = {
 		.pm		= &p9221_pm_ops,
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
-	.probe		= p9221_charger_probe,
+	.probe_new	= p9221_charger_probe,
 	.remove		= p9221_charger_remove,
 	.id_table	= p9221_charger_id_table,
 };
