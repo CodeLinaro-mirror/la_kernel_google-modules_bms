@@ -218,31 +218,35 @@ static inline int max17x0x_regmap_write(const struct max17x0x_regmap *map,
 #define REGMAP_WRITE(regmap, what, value) \
 	max17x0x_regmap_write(regmap, what, value, #what)
 
+#define WAIT_VERIFY	(10 * USEC_PER_MSEC) /* 10 msec */
 static inline int max1720x_regmap_writeverify(const struct max17x0x_regmap *map,
 					unsigned int reg,
 					u16 data,
 					const char *name)
 {
-	int tmp, ret;
+	int tmp, ret, retries;
 
 	if (!map->regmap) {
 		pr_err("Failed to write %s, no regmap\n", name);
 		return -EINVAL;
 	}
 
-	ret = regmap_write(map->regmap, reg, data);
-	if (ret < 0) {
-		pr_err("Failed to write %s\n", name);
-		return -EIO;
+	for (retries = 3; retries > 0; retries--) {
+		ret = regmap_write(map->regmap, reg, data);
+		if (ret < 0)
+			continue;
+
+		usleep_range(WAIT_VERIFY, WAIT_VERIFY + 100);
+
+		ret = regmap_read(map->regmap, reg, &tmp);
+		if (ret < 0)
+			continue;
+
+		if (tmp == data)
+			return 0;
 	}
 
-	ret = regmap_read(map->regmap, reg, &tmp);
-	if (ret < 0) {
-		pr_err("Failed to read %s\n", name);
-		return -EIO;
-	}
-
-	return (tmp == data) ? 0 : -EIO;
+	return -EIO;
 }
 
 #define REGMAP_WRITE_VERIFY(regmap, what, value) \
@@ -274,6 +278,15 @@ struct max1720x_drift_data {
 	int ini_rcomp0;
 	int ini_tempco;
 	int ini_filtercfg;
+};
+
+struct max1720x_dyn_filtercfg {
+	s32 temp;
+	s32 hysteresis;
+	u16 curr_val;
+	u16 default_val;
+	u16 adjust_val;
+	struct mutex lock;
 };
 
 extern int max1720x_fixup_comp(struct max1720x_drift_data *ddata,
