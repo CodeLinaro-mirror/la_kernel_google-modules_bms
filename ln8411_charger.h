@@ -12,6 +12,7 @@
 #include <linux/thermal.h>
 #include <linux/pm_runtime.h>
 #include <linux/kernel.h>
+#include <linux/gpio/driver.h>
 
 /* Google integration */
 #include "gbms_power_supply.h"
@@ -36,10 +37,8 @@ struct ln8411_platform_data {
 	u32		iin_topoff;	/* Input Topoff current -uV unit */
 	s32		iin_max_offset;
 	s32		iin_cc_comp_offset;
-	u32		ta_max_vol;
 	u32		ta_max_vol_2_1;
 	u32		ta_max_vol_4_1;
-	u32		ta_max_vol_cp;
 
 	/* irdrop */
 	s32		irdrop_limits[3];
@@ -277,6 +276,10 @@ struct ln8411_charger {
 	struct ln8411_chip_info chip_info;
 	struct attribute_group 	attrs;    /* SysFS attributes */
 	struct delayed_work 	init_hw_work;
+
+#if IS_ENABLED(CONFIG_GPIOLIB)
+	struct gpio_chip gpio;
+#endif
 	/* Google Integration END */
 
 	/* Temporary, only for A1 silicon */
@@ -325,7 +328,7 @@ enum {
 /* PPS timers */
 #define LN8411_PDMSG_WAIT_T		250	/* 250ms */
 #define LN8411_PDMSG_RETRY_T		1000	/* 1000ms */
-#define LN8411_PDMSG_WLC_WAIT_T	5000	/* 5000ms */
+#define LN8411_PDMSG_WLC_WAIT_T	2000	/* 2000ms */
 #define LN8411_PPS_PERIODIC_T		10000	/* 10000ms */
 #define LN8411_TA_CONFIG_WAIT_T		(4 * LN8411_PDMSG_WAIT_T)
 
