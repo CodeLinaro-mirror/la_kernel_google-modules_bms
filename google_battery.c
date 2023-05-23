@@ -7331,7 +7331,16 @@ static ssize_t health_set_cal_mode_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR_WO(health_set_cal_mode);
+static ssize_t health_set_cal_mode_show(struct device *dev, struct device_attribute *attr,
+					char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct batt_drv *batt_drv = (struct batt_drv *)power_supply_get_drvdata(psy);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", batt_drv->health_data.cal_mode);
+}
+
+static DEVICE_ATTR_RW(health_set_cal_mode);
 
 static ssize_t health_get_cal_state_show(struct device *dev,
 				       struct device_attribute *attr, char *buf)
@@ -7362,7 +7371,21 @@ static ssize_t health_set_trend_points_store(struct device *dev,
 	return count;
 }
 
-static const DEVICE_ATTR_WO(health_set_trend_points);
+static ssize_t health_set_trend_points_show(struct device *dev, struct device_attribute *attr,
+					     char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct batt_drv *batt_drv = power_supply_get_drvdata(psy);
+	struct bhi_data *bhi_data = &batt_drv->health_data.bhi_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%d,%d,%d,%d,%d,%d,%d,%d\n",
+			 bhi_data->trend[0], bhi_data->trend[1], bhi_data->trend[2],
+			 bhi_data->trend[3], bhi_data->trend[4], bhi_data->trend[5],
+			 bhi_data->trend[6], bhi_data->trend[7]);
+
+}
+
+static const DEVICE_ATTR_RW(health_set_trend_points);
 
 static ssize_t health_set_low_boundary_store(struct device *dev,
 					     struct device_attribute *attr,
@@ -7382,7 +7405,20 @@ static ssize_t health_set_low_boundary_store(struct device *dev,
 	return count;
 }
 
-static const DEVICE_ATTR_WO(health_set_low_boundary);
+static ssize_t health_set_low_boundary_show(struct device *dev, struct device_attribute *attr,
+					    char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct batt_drv *batt_drv = power_supply_get_drvdata(psy);
+	struct bhi_data *bhi_data = &batt_drv->health_data.bhi_data;
+
+	return scnprintf(buf, PAGE_SIZE, "%d,%d,%d,%d,%d,%d,%d,%d\n",
+			 bhi_data->l_bound[0], bhi_data->l_bound[1], bhi_data->l_bound[2],
+			 bhi_data->l_bound[3], bhi_data->l_bound[4], bhi_data->l_bound[5],
+			 bhi_data->l_bound[6], bhi_data->l_bound[7]);
+}
+
+static const DEVICE_ATTR_RW(health_set_low_boundary);
 
 /* CSI --------------------------------------------------------------------- */
 
@@ -9088,20 +9124,29 @@ static int gbatt_set_health(struct batt_drv *batt_drv, int health)
 	return 0;
 }
 
+#define RESTORE_SOC_THRESHOLD	5
 static int gbatt_restore_capacity(struct batt_drv *batt_drv)
 {
 	struct batt_ssoc_state *ssoc_state = &batt_drv->ssoc_state;
-	int ret = 0;
+	int ret = 0, save_soc, gdf_soc;
 
 	ret = gbms_storage_read(GBMS_TAG_RSOC, &ssoc_state->save_soc,
-				sizeof(ssoc_state->save_soc));
+						sizeof(ssoc_state->save_soc));
 
 	if (ret < 0)
 		return ret;
 
-	pr_info("save_soc:%d", ssoc_state->save_soc);
-	if (ssoc_state->save_soc <= SSOC_FULL)
-		gbatt_reset_curve(batt_drv, ssoc_state->save_soc);
+	if (ssoc_state->save_soc) {
+		save_soc = (int)ssoc_state->save_soc;
+		gdf_soc = qnum_toint(ssoc_state->ssoc_gdf);
+		pr_info("save_soc:%d, gdf:%d", save_soc, gdf_soc);
+
+		if ((save_soc < gdf_soc) ||
+		    (save_soc - gdf_soc) > RESTORE_SOC_THRESHOLD)
+			return ret;
+
+		gbatt_reset_curve(batt_drv, save_soc);
+	}
 
 	return ret;
 }
