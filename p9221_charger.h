@@ -434,6 +434,7 @@
 #define P9412_DIE_TEMP_REG			0x46 /* 2 byte in C */
 #define P9412_V5P0AP_SWITCH_REG			0x81
 #define V5P0AP_SWITCH_EN			BIT(7)
+#define P9412_VCPOUT_VOL_REG			0x10C
 
 #define P9412_CMFET_L_REG			0xF4
 #define P9412_CDMODE_STS_REG			0x100
@@ -497,6 +498,8 @@
 						 P9412_CAL_STATE_2)
 /* Rx Communication Modulation FET(CMFET) */
 #define P9412_CMFET_DISABLE_ALL			(0xF0) /* CM-A/B-1/2: REG[7:4]=0b1111 */
+#define P9412_CMFET_DEFAULT			(0x30) /* REG[7:4]=0b0011 */
+#define P9412_CMFET_2_COMM			(0xC0) /* REG[7:4]=0b1100 */
 
 #define P9221_CRC8_POLYNOMIAL			0x07    /* (x^8) + x^2 + x + 1 */
 #define P9412_ADT_TYPE_AUTH			0x02
@@ -517,10 +520,7 @@
 #define P9412_MOT_REG				0xD0
 #define P9412_MOT_40PCT				0x10
 #define P9412_MOT_65PCT				0x1A
-
-#define P9412_MOT_REG				0xD0
-#define P9412_MOT_40PCT				0x10
-#define P9412_MOT_65PCT				0x1A
+#define P9412_MOT_30PCT                         0x0C
 
 /* Features */
 typedef enum {
@@ -706,7 +706,7 @@ struct p9221_charger_data {
 	struct p9221_charger_ints_bit	ints;
 	struct power_supply		*wc_psy;
 	struct power_supply		*dc_psy;
-	struct power_supply		*fg_psy;
+	struct power_supply		*batt_psy;
 	struct gvotable_election	*dc_icl_votable;
 	struct gvotable_election	*dc_suspend_votable;
 	struct gvotable_election	*tx_icl_votable;
@@ -714,6 +714,7 @@ struct p9221_charger_data {
 	struct gvotable_election	*chg_mode_votable;
 	struct gvotable_election	*wlc_disable_votable;
 	struct gvotable_election	*csi_status_votable;
+	struct gvotable_election	*csi_type_votable;
 	struct notifier_block		nb;
 	struct mutex			io_lock;
 	struct mutex			cmd_lock;
@@ -729,7 +730,7 @@ struct p9221_charger_data {
 	struct delayed_work		rtx_work;
 	struct delayed_work		power_mitigation_work;
 	struct delayed_work		auth_dc_icl_work;
-	struct delayed_work		fg_work;
+	struct delayed_work		soc_work;
 	struct delayed_work		chk_rp_work;
 	struct delayed_work		chk_rtx_ocp_work;
 	struct delayed_work		chk_fod_work;
@@ -859,6 +860,7 @@ struct p9221_charger_data {
 	u16				reg_q_factor_addr;
 	u16				reg_csp_addr;
 	u16				reg_light_load_addr;
+	u16				reg_mot_addr;
 
 	int (*reg_read_n)(struct p9221_charger_data *chgr, u16 reg,
 			  void *buf, size_t n);
@@ -889,6 +891,7 @@ struct p9221_charger_data {
 	int (*chip_get_vout)(struct p9221_charger_data *chgr, u32 *mv);
 	int (*chip_get_iout)(struct p9221_charger_data *chgr, u32 *ma);
 	int (*chip_get_op_freq)(struct p9221_charger_data *chgr, u32 *khz);
+	int (*chip_get_vcpout)(struct p9221_charger_data *chgr, u32 *mv);
 	int (*chip_set_cmd)(struct p9221_charger_data *chgr, u16 cmd);
 	int (*chip_get_rx_ilim)(struct p9221_charger_data *chgr, u32 *ma);
 	int (*chip_set_rx_ilim)(struct p9221_charger_data *chgr, u32 ma);
@@ -976,6 +979,8 @@ enum p9xxx_renego_state {
       -ENOTSUPP : chgr->reg_write_8(chgr, chgr->reg_q_factor_addr, data))
 #define p9xxx_chip_set_light_load_reg(chgr, data) (chgr->reg_light_load_addr == 0 ? \
       -ENOTSUPP : chgr->reg_write_8(chgr, chgr->reg_light_load_addr, data))
+#define p9xxx_chip_set_mot_reg(chgr, data) (chgr->reg_mot_addr == 0 ? \
+      -ENOTSUPP : chgr->reg_write_8(chgr, chgr->reg_mot_addr, data))
 #define logbuffer_prlog(p, fmt, ...)     \
       gbms_logbuffer_prlog(p, LOGLEVEL_INFO, 0, LOGLEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #endif /* __P9221_CHARGER_H__ */
