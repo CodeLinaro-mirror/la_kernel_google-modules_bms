@@ -326,7 +326,7 @@ struct bhi_data
 	int battery_age;		/* from the FG, time in field */
 
 	/* capacity metrics */
-	int capacity_design;		/* from the FG or from charge table */
+	int pack_capacity;		/* mAh, from the FG or from charge table */
 	int capacity_fade;		/* from the FG */
 
 	/* impedance */
@@ -434,6 +434,8 @@ struct csi_stats {
 	uint16_t cc_in;
 	uint16_t cc_out;
 	ktime_t thermal_severity[CSI_THERMAL_SEVERITY_MAX];
+	int thermal_lvl_max;
+	int thermal_lvl_min;
 };
 
 #define TEMP_SAMPLE_SIZE 5
@@ -636,6 +638,7 @@ struct batt_drv {
 	/* charging policy */
 	struct gvotable_election *charging_policy_votable;
 	int charging_policy;
+	int batt_id;
 };
 
 static int gbatt_get_temp(struct batt_drv *batt_drv, int *temp);
@@ -2611,10 +2614,12 @@ log_and_done:
 		hours = div_u64_rem(res, 3600, &remaining_sec);
 
 		gbms_logbuffer_prlog(batt_drv->ttf_stats.ttf_log, LOGLEVEL_INFO, 0, LOGLEVEL_DEBUG,
-				     "ssoc=%d temp=%d CSI[min=%d max=%d avg=%d type=%d status=%d TTF[cc=%d time=%lld %lld:%d:%d (est=%lld max_ratio=%d)]",
-				     csi_stats->ssoc, batt_drv->batt_temp, csi_stats->csi_speed_min,
-				     csi_stats->csi_speed_max, csi_speed_avg,
+				     "ssoc=%d temp=%d CSI[speed=%d,%d,%d type=%d status=%d lvl=%d,%d"
+				     " TTF[cc=%d time=%lld %lld:%d:%d (est=%lld max_ratio=%d)]",
+				     csi_stats->ssoc, batt_drv->batt_temp, csi_speed_avg,
+				     csi_stats->csi_speed_min, csi_stats->csi_speed_max,
 				     csi_stats->csi_current_type, csi_stats->csi_current_status,
+				     csi_stats->thermal_lvl_min, csi_stats->thermal_lvl_max,
 				     cc / 1000, right_now, hours, remaining_sec / 60,
 				     remaining_sec % 60, res, max_ratio);
 
@@ -2627,6 +2632,12 @@ log_and_done:
 	csi_stats->ssoc = ssoc;
 	csi_stats->csi_speed_min = current_speed;
 	csi_stats->csi_speed_max = current_speed;
+
+	/* ssoc == -1 on disconnect */
+	if (ssoc == -1) {
+		csi_stats->thermal_lvl_min = 0;
+		csi_stats->thermal_lvl_max = 0;
+	}
 
 	csi_stats->csi_time_sum = 0;
 	csi_stats->speed_sum = 0;
@@ -2886,12 +2897,37 @@ static int batt_calc_charging_speed(struct batt_drv *batt_drv)
 	return chg_speed;
 }
 
+static void batt_update_thermal_lvl(struct batt_drv *batt_drv)
+{
+	struct csi_stats *csi_stats = &batt_drv->csi_stats;
+	int thermal_level = 0;
+
+	if (chg_state_is_disconnected(&batt_drv->chg_state))
+		return;
+
+	if (!batt_drv->thermal_level_votable)
+		batt_drv->thermal_level_votable = gvotable_election_get_handle(VOTABLE_THERMAL_LVL);
+	if (batt_drv->thermal_level_votable)
+		thermal_level = gvotable_get_current_int_vote(batt_drv->thermal_level_votable);
+
+	if (thermal_level < 0)
+		return;
+
+	if (csi_stats->thermal_lvl_max == 0 && csi_stats->thermal_lvl_min == 0)
+		csi_stats->thermal_lvl_max = csi_stats->thermal_lvl_min = thermal_level;
+	else if (thermal_level > csi_stats->thermal_lvl_max)
+		csi_stats->thermal_lvl_max = thermal_level;
+	else if (thermal_level < csi_stats->thermal_lvl_min)
+		csi_stats->thermal_lvl_min = thermal_level;
+}
+
 static void batt_update_csi_info(struct batt_drv *batt_drv)
 {
 	int charging_speed;
 
 	batt_update_csi_type(batt_drv);
 	batt_update_csi_status(batt_drv);
+	batt_update_thermal_lvl(batt_drv);
 
 	charging_speed = batt_calc_charging_speed(batt_drv);
 	if (batt_drv->csi_current_speed != charging_speed) {
@@ -3747,10 +3783,17 @@ static int hist_get_index(int cycle_count, const struct batt_drv *batt_drv)
 static int bhi_cap_data_update(struct bhi_data *bhi_data, struct batt_drv *batt_drv)
 {
 	struct power_supply *fg_psy = batt_drv->fg_psy;
+	const int fade_rate = GPSY_GET_PROP(fg_psy, GBMS_PROP_CAPACITY_FADE_RATE);
+	const int designcap = GPSY_GET_PROP(fg_psy, POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN);
 	int cap_fade;
 
 	/* GBMS_PROP_CAPACITY_FADE_RATE is in percent */
-	cap_fade = GPSY_GET_PROP(fg_psy, GBMS_PROP_CAPACITY_FADE_RATE);
+	if (fade_rate < 0 || designcap < 0)
+		return -ENODATA;
+	if (bhi_data->pack_capacity <= 0)
+		return -EINVAL;
+
+	cap_fade = fade_rate * designcap / (bhi_data->pack_capacity * 1000);
 	if (cap_fade < 0)
 		return -ENODATA;
 	if (cap_fade > 100)
@@ -3771,7 +3814,7 @@ static int bhi_cap_data_update(struct bhi_data *bhi_data, struct batt_drv *batt_
  */
 static int bhi_health_get_capacity(int algo, const struct bhi_data *bhi_data)
 {
-	return bhi_data->capacity_design * (100 - bhi_data->capacity_fade) / 100;
+	return bhi_data->pack_capacity * (100 - bhi_data->capacity_fade) / 100;
 }
 
 /* The limit for capacity is 80% of design */
@@ -3787,7 +3830,7 @@ static int bhi_calc_cap_index(int algo, struct batt_drv *batt_drv)
 	if (health_data->bhi_debug_cap_index)
 		return health_data->bhi_debug_cap_index;
 
-	if (!bhi_data->capacity_design)
+	if (!bhi_data->pack_capacity)
 		return -ENODATA;
 
 	capacity_health = bhi_health_get_capacity(algo, bhi_data);
@@ -3809,12 +3852,12 @@ static int bhi_calc_cap_index(int algo, struct batt_drv *batt_drv)
 	 * ret = gbms_storage_read(GBMS_TAG_GCFE, &gcap sizeof(gcap));
 	 */
 
-	index = (capacity_health * BHI_ALGO_FULL_HEALTH) / bhi_data->capacity_design;
+	index = (capacity_health * BHI_ALGO_FULL_HEALTH) / bhi_data->pack_capacity;
 	if (index > BHI_ALGO_FULL_HEALTH)
 		index = BHI_ALGO_FULL_HEALTH;
 
-	pr_debug("%s: algo=%d index=%d ch=%d, ca=%d, cd=%d, fr=%d\n", __func__,
-		algo, index, capacity_health, capacity_aacr, bhi_data->capacity_design,
+	pr_debug("%s: algo=%d index=%d ch=%d, ca=%d, pc=%d, fr=%d\n", __func__,
+		algo, index, capacity_health, capacity_aacr, bhi_data->pack_capacity,
 		bhi_data->capacity_fade);
 
 	return index;
@@ -7459,13 +7502,26 @@ static ssize_t health_set_trend_points_store(struct device *dev,
 	struct power_supply *psy = container_of(dev, struct power_supply, dev);
 	struct batt_drv *batt_drv = power_supply_get_drvdata(psy);
 	struct bhi_data *bhi_data = &batt_drv->health_data.bhi_data;
-	int cnt = sscanf(buf, "%hu,%hu,%hu,%hu,%hu,%hu,%hu,%hu",
-			 &bhi_data->trend[0], &bhi_data->trend[1], &bhi_data->trend[2],
-			 &bhi_data->trend[3], &bhi_data->trend[4], &bhi_data->trend[5],
-			 &bhi_data->trend[6], &bhi_data->trend[7]);
+	u16 trend[BHI_TREND_POINTS_SIZE];
+	const int buf_len = strlen(buf);
+	int cnt = 0, len = 0, batt_id;
 
-	if (cnt != BHI_TREND_POINTS_SIZE)
-		return -ERANGE;
+	do {
+		cnt = sscanf(&buf[len], "%d,%hu,%hu,%hu,%hu,%hu,%hu,%hu,%hu", &batt_id,
+			     &trend[0], &trend[1], &trend[2], &trend[3],
+			     &trend[4], &trend[5], &trend[6], &trend[7]);
+
+		if (cnt != BHI_TREND_POINTS_SIZE + 1)
+			return -ERANGE;
+
+		if (batt_id == batt_drv->batt_id) {
+			memcpy(&bhi_data->trend, trend, sizeof(trend));
+			break;
+		}
+
+		while (buf[len] != '\n' && len < buf_len)
+			len++;
+	} while (len++ < buf_len);
 
 	return count;
 }
@@ -7493,13 +7549,26 @@ static ssize_t health_set_low_boundary_store(struct device *dev,
 	struct power_supply *psy = container_of(dev, struct power_supply, dev);
 	struct batt_drv *batt_drv = power_supply_get_drvdata(psy);
 	struct bhi_data *bhi_data = &batt_drv->health_data.bhi_data;
-	int cnt = sscanf(buf, "%hu,%hu,%hu,%hu,%hu,%hu,%hu,%hu",
-			 &bhi_data->l_bound[0], &bhi_data->l_bound[1], &bhi_data->l_bound[2],
-			 &bhi_data->l_bound[3], &bhi_data->l_bound[4], &bhi_data->l_bound[5],
-			 &bhi_data->l_bound[6], &bhi_data->l_bound[7]);
+	u16 l_bound[BHI_TREND_POINTS_SIZE];
+	const int buf_len = strlen(buf);
+	int cnt = 0, len = 0, batt_id;
 
-	if (cnt != BHI_TREND_POINTS_SIZE)
-		return -ERANGE;
+	do {
+		cnt = sscanf(&buf[len], "%d,%hu,%hu,%hu,%hu,%hu,%hu,%hu,%hu", &batt_id,
+			     &l_bound[0], &l_bound[1], &l_bound[2], &l_bound[3],
+			     &l_bound[4], &l_bound[5], &l_bound[6], &l_bound[7]);
+
+		if (cnt != BHI_TREND_POINTS_SIZE + 1)
+			return -ERANGE;
+
+		if (batt_id == batt_drv->batt_id) {
+			memcpy(&bhi_data->l_bound, l_bound, sizeof(l_bound));
+			break;
+		}
+
+		while (buf[len] != '\n' && len < buf_len)
+			len++;
+	} while (len++ < buf_len);
 
 	return count;
 }
@@ -9649,7 +9718,10 @@ static int batt_bhi_init(struct batt_drv *batt_drv)
 		health_data->bhi_cycle_grace = 0;
 
 	/* design is the value used to build the charge table */
-	health_data->bhi_data.capacity_design = batt_drv->battery_capacity;
+	health_data->bhi_data.pack_capacity = batt_drv->battery_capacity;
+
+	/* need battery id to get right trend points */
+	batt_drv->batt_id = GPSY_GET_PROP(batt_drv->fg_psy, GBMS_PROP_BATT_ID);
 
 	/* debug data initialization */
 	health_data->bhi_debug_cycle_count = 0;

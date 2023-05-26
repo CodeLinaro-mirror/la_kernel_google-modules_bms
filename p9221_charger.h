@@ -526,7 +526,7 @@
 #define P9412_MIN_FREQ_PER			0x94
 #define P9412_MIN_FREQ_PER_120			1000	/* 120000/120 */
 #define P9412_TX_FOD_THRSH_REG			0xD4
-#define P9412_TX_FOD_THRSH_1500			0x640
+#define P9412_TX_FOD_THRSH_1600			0x640
 
 #define P9412_MOT_REG				0xD0
 #define P9412_MOT_40PCT				0x10
@@ -553,6 +553,9 @@
 #define RA9530_PROP_MODE_PWR_STEP		6
 #define RA9530_RX_ILIM_MAX_MA			2600
 #define RA9530_EPP_CAL_STATE_MASK		0xf
+#define RA9530_PLIM_REG				0x2F0
+#define RA9530_PLIM_900MA			0x384
+#define RA9530_MIN_FREQ_PER_120			0x1f3	/* 60000/120 - 1 */
 
 /* Features */
 typedef enum {
@@ -899,6 +902,7 @@ struct p9221_charger_data {
 	u32 				wlc_dc_voltage_now;
 	u32 				wlc_dc_current_now;
 	bool				wlc_dc_enabled;
+	bool				chg_mode_off;
 
 	u16				reg_tx_id_addr;
 	u16				reg_tx_mfg_code_addr;

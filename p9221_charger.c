@@ -816,6 +816,7 @@ static int p9221_reset_wlc_dc(struct p9221_charger_data *charger)
 	if (!charger->pdata->has_wlc_dc)
 		return -EOPNOTSUPP;
 
+	dev_dbg(&charger->client->dev, "%s\n start", __func__);
 	charger->wlc_dc_enabled = false;
 
 	usleep_range(500 * USEC_PER_MSEC, 510 * USEC_PER_MSEC);
@@ -829,6 +830,13 @@ static int p9221_reset_wlc_dc(struct p9221_charger_data *charger)
 		dev_warn(&charger->client->dev, "Cannot disable HPP_ICL (%d)\n", ret);
 
 	gvotable_cast_int_vote(charger->dc_icl_votable, P9221_HPP_VOTER, 0, false);
+
+	if (charger->chg_mode_votable) {
+		gvotable_cast_long_vote(charger->chg_mode_votable,
+					P9221_WLC_VOTER,
+					0, false);
+		charger->chg_mode_off = false;
+	}
 
 	ret = p9xxx_set_bypass_mode(charger);
 	if (ret) {
@@ -5047,14 +5055,19 @@ static int p9382_set_rtx(struct p9221_charger_data *charger, bool enable)
 		/*
 		 * Check if WLC online
 		 * NOTE: when used CHARGER_MODE will also prevent this.
+		 *
+		 * TODO(b/280096024): temporarily disabled for 9530 bringup
+		 * until sequoia integration is done. Need to remove this line after
 		 */
-		if (charger->online) {
-			dev_err(&charger->client->dev,
-				"rTX is not allowed during WLC\n");
-			logbuffer_log(charger->rtx_log,
-				      "rTX is not allowed during WLC\n");
-			charger->rtx_reset_cnt = 0;
-			goto done;
+		if (charger->chip_id != RA9530_CHIP_ID) {
+			if (charger->online) {
+				dev_err(&charger->client->dev,
+					"rTX is not allowed during WLC\n");
+				logbuffer_log(charger->rtx_log,
+					      "rTX is not allowed during WLC\n");
+				charger->rtx_reset_cnt = 0;
+				goto done;
+			}
 		}
 
 		/*
@@ -7247,7 +7260,8 @@ static int p9221_charger_probe(struct i2c_client *client,
 
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	if (charger->pdata->chip_id == P9412_CHIP_ID ||
-	    charger->pdata->chip_id == P9222_CHIP_ID) {
+	    charger->pdata->chip_id == P9222_CHIP_ID ||
+	    charger->pdata->chip_id == RA9530_CHIP_ID) {
 		p9xxx_gpio_init(charger);
 		charger->gpio.parent = &client->dev;
 		charger->gpio.of_node = of_find_node_by_name(client->dev.of_node,
