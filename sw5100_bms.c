@@ -54,6 +54,8 @@ struct bms_dev {
 	u32				rradc_base;
 	int				chg_term_voltage;
 	int				chg_term_voltage_debounce;
+	/* Amount of SOC percentage points to offset to 0% UI SOC. */
+	int				soc_shutdown_offset;
 	struct iio_channel		*batt_therm_chan;
 	struct iio_channel		*batt_id_chan;
 	struct iio_channel		**iio_chan_list_qg;
@@ -818,19 +820,20 @@ static int sw5100_get_batt_present(struct bms_dev *bms)
 }
 
 /** Given a SOC percentage aka capacity we're going to scale 5-100 to 0-100. */
-static int scale_capacity(int capacity)
+static int scale_capacity(struct bms_dev const *bms, int capacity)
 {
-#if defined(CAPACITY_OFFSET) && CAPACITY_OFFSET > 0 && CAPACITY_OFFSET < 100
-	if (capacity > 100) {
-		return 100;
-	} else if (capacity >= CAPACITY_OFFSET) {
-		return (((capacity - CAPACITY_OFFSET) * 100) / (100 - CAPACITY_OFFSET));
+	if (bms->soc_shutdown_offset > 0) {
+		if (capacity >= 100) {
+			return 100;
+		} else if (capacity >= bms->soc_shutdown_offset) {
+			return (((capacity - bms->soc_shutdown_offset) * 100) /
+				(100 - bms->soc_shutdown_offset));
+		} else {
+			return 0;
+		}
 	} else {
-		return 0;
+		return capacity;
 	}
-#else
-	return capacity;
-#endif
 }
 
 static int sw5100_psy_get_property(struct power_supply *psy,
@@ -940,12 +943,12 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 	case GBMS_PROP_CAPACITY_RAW:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);
 		if (rc == 0)
-			pval->intval = (scale_capacity(ivalue) << 8);
+			pval->intval = (scale_capacity(bms, ivalue) << 8);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);
 		if (rc == 0)
-			pval->intval = scale_capacity(ivalue);
+			pval->intval = scale_capacity(bms, ivalue);
 		break;
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CYCLE_COUNT, &ivalue);
@@ -1074,6 +1077,27 @@ static int sw5100_charge_pause(struct bms_dev *bms, bool pause)
 
 	return rc;
 }
+
+static ssize_t soc_shutdown_offset_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct bms_dev *bms = power_supply_get_drvdata(psy);
+
+	sscanf(buf, "%d", &bms->soc_shutdown_offset);
+	return count;
+}
+
+static ssize_t soc_shutdown_offset_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct bms_dev *bms = power_supply_get_drvdata(psy);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", bms->soc_shutdown_offset);
+}
+
+static const DEVICE_ATTR_RW(soc_shutdown_offset);
 
 static int sw5100_psy_set_property(struct power_supply *psy,
 				  enum power_supply_property psp,
@@ -1278,6 +1302,10 @@ static int sw5100_parse_dt(struct bms_dev *bms)
 		sw5100_psy_desc.name =
 			devm_kstrdup(bms->dev, psy_name, GFP_KERNEL);
 
+	ret = of_property_read_u32(node, "google,soc_shutdown_offset", &bms->soc_shutdown_offset);
+	if (ret < 0)
+		bms->soc_shutdown_offset = 0;
+
 	if (sw5100_psy_desc.name == NULL)
 		return -EINVAL;
 
@@ -1342,6 +1370,10 @@ static int bms_probe(struct platform_device *pdev)
 		pr_err("failed to register psy rc = %ld\n", PTR_ERR(bms->psy));
 		goto exit;
 	}
+
+	rc = device_create_file(&bms->psy->dev, &dev_attr_soc_shutdown_offset);
+	if (rc < 0)
+		dev_err(&bms->psy->dev, "Failed to create soc scaling offset for shutdown\n");
 
 	iio_list = sw5100_get_ext_channels(bms->dev, sw5100_qbg_ext_iio_chan,
 		ARRAY_SIZE(sw5100_qbg_ext_iio_chan));
