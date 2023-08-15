@@ -98,6 +98,8 @@ static int adc_gain[16] = { 0,  1,  2,  3,  4,  5,  6,  7,
 #define PCA9468_TA_MAX_VOL_CP		9800000	/* 9760000uV --> 9800000uV */
 /* Offset for cc_max / 2 */
 #define PCA9468_IIN_MAX_OFFSET		0
+/* Offset for TA max current */
+#define PCA9468_TA_CUR_MAX_OFFSET	200000 /* uA */
 
 
 /* maximum retry counter for restarting charging */
@@ -369,6 +371,12 @@ static int pca9468_set_input_current(struct pca9468_charger *pca9468,
 		 iin, val * PCA9468_IIN_CFG_STEP, ret);
 
 	return ret;
+}
+
+static inline bool pca9468_can_inc_ta_cur(struct pca9468_charger *pca9468)
+{
+	return pca9468->ta_cur + PD_MSG_TA_CUR_STEP < min(pca9468->ta_max_cur,
+		pca9468->iin_cc + PCA9468_TA_CUR_MAX_OFFSET);
 }
 
 /* Returns the enable or disable value. into 1 or 0. */
@@ -1312,7 +1320,7 @@ static int pca9468_set_ta_current_comp(struct pca9468_charger *pca9468)
 			if (pca9468->ta_vol == pca9468->ta_max_vol) {
 				/* TA voltage is already the maximum voltage */
 				/* Compare TA max current */
-				if (pca9468->ta_cur == pca9468->ta_max_cur) {
+				if (!pca9468_can_inc_ta_cur(pca9468)) {
 					/* TA voltage and current are at max */
 					logbuffer_prlog(pca9468, LOGLEVEL_DEBUG,
 							"End1: ta_vol=%u, ta_cur=%u",
@@ -1360,7 +1368,7 @@ static int pca9468_set_ta_current_comp(struct pca9468_charger *pca9468)
 
 			/* Try to increase TA current */
 			/* Compare TA max current */
-			if (pca9468->ta_cur == pca9468->ta_max_cur) {
+			if (!pca9468_can_inc_ta_cur(pca9468)) {
 
 				/* TA current is already the maximum current */
 				/* Compare TA max voltage */
@@ -1413,7 +1421,7 @@ static int pca9468_set_ta_current_comp(struct pca9468_charger *pca9468)
 			/* TA voltage is already the maximum voltage */
 
 			/* Compare TA maximum current */
-			if (pca9468->ta_cur == pca9468->ta_max_cur) {
+			if (!pca9468_can_inc_ta_cur(pca9468)) {
 				/*
 				* TA voltage and current are already at the
 				 * maximum values
@@ -2613,7 +2621,7 @@ static int pca9468_ajdust_ccmode_wired(struct pca9468_charger *pca9468, int iin)
 
 		/* Try to increase TA current */
 		/* Check APDO max current */
-	} else if (pca9468->ta_cur == pca9468->ta_max_cur) {
+	} else if (!pca9468_can_inc_ta_cur(pca9468)) {
 		/* TA current is maximum current */
 
 		logbuffer_prlog(pca9468, LOGLEVEL_DEBUG,
