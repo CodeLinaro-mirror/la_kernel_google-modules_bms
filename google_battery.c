@@ -1066,7 +1066,7 @@ static int fan_bt_calculate_level(const struct batt_drv *batt_drv)
 	int level, temp, ret;
 
 	ret = gbatt_get_temp(batt_drv, &temp);
-	if (ret < 0) {
+	if (ret != 0) {
 
 		if (batt_drv->temp_idx < 2)
 			level = FAN_LVL_NOT_CARE;
