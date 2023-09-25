@@ -1891,145 +1891,13 @@ static int gcpm_dc_chg_avail_callback(struct gvotable_election *el,
 
 /* --------------------------------------------------------------------- */
 
-
-static int gcpm_psy_set_property(struct power_supply *psy,
-				 enum power_supply_property psp,
-				 const union power_supply_propval *pval)
+static int gcpm_set_active_charger(struct gcpm_drv *gcpm,
+				   enum power_supply_property psp,
+				   const union power_supply_propval *pval,
+				   bool ta_check, bool route)
 {
-	struct gcpm_drv *gcpm = power_supply_get_drvdata(psy);
 	struct power_supply *chg_psy = NULL;
-	bool ta_check = false;
-	bool route = true;
 	int ret = 0;
-
-	pm_runtime_get_sync(gcpm->device);
-	if (!gcpm->init_complete || !gcpm->resume_complete) {
-		pm_runtime_put_sync(gcpm->device);
-		return -EAGAIN;
-	}
-	pm_runtime_put_sync(gcpm->device);
-
-	mutex_lock(&gcpm->chg_psy_lock);
-	switch (psp) {
-	/* do not route to the active charger */
-	case GBMS_PROP_TAPER_CONTROL: {
-		int count = 0;
-
-		if (pval->intval != GBMS_TAPER_CONTROL_OFF)
-			count = gcpm->taper_step_count + gcpm->taper_step_grace;
-
-		/* ta_check is set when taper control changes value */
-		ta_check = gcpm_taper_ctl(gcpm, count);
-		route = false;
-	} break;
-
-	/* route to the active charger in most cases */
-	case GBMS_PROP_CHARGE_DISABLE:
-
-		/* google_charger send this on disconnect and input_suspend. */
-		pr_info("%s: ChargeDisable value=%d dc_index=%d dc_state=%d\n",
-			__func__, pval->intval, gcpm->dc_index, gcpm->dc_state);
-
-		if (pval->intval) {
-			/*
-			 * more or less the same as gcpm_pps_wlc_dc_work() when
-			 * dc_index <= 0. But the default charger must not be
-			 * restarted in this case though.
-			 * TODO: factor the code with gcpm_pps_wlc_dc_work().
-			 */
-
-			/*
-			 * No op if the current source is not DC (uncluding
-			 * stop while in DC_ENABLE_), ->dc_state
-			 * will be DC_DISABLED if this was actually disabled.
-			 */
-			ret = gcpm_dc_stop(gcpm,  gcpm->chg_psy_active);
-			if (ret == -EAGAIN) {
-				pr_debug("%s: cannot disable, try again\n", __func__);
-				mutex_unlock(&gcpm->chg_psy_lock);
-				return -EAGAIN;
-			}
-
-			ret = gcpm_pps_offline(gcpm);
-			if (ret < 0)
-				pr_debug("%s: fail 2 offline pps, dc_state=%d (%d)\n",
-					__func__, gcpm->dc_state, ret);
-
-			/* reset to the default charger, and clear taper */
-			gcpm->dc_index = GCPM_DEFAULT_CHARGER;
-			gcpm_taper_ctl(gcpm, 0);
-
-			/*
-			 * no-op if dc was NOT running, set online the charger
-			 * but do not start it otherwise.
-			 */
-			ret = gcpm_chg_start(gcpm, GCPM_DEFAULT_CHARGER,
-					     gcpm->fv_uv, gcpm->cc_max);
-			if (ret < 0)
-				pr_err("%s: cannot start default (%d)\n",
-				       __func__, ret);
-
-			pr_info("%s: ChargeDisable value=%d dc_index=%d dc_state=%d\n",
-				__func__, pval->intval, gcpm->dc_index, gcpm->dc_state);
-
-			/*
-			 * route = true so active will get the property.
-			 * No need to re-check the TA selection on disable.
-			 */
-			ta_check = false;
-		} else if (gcpm->dc_state <= DC_IDLE) {
-			/*
-			 * ->dc_state will be DC_DISABLED if DC was disabled
-			 * via GBMS_PROP_CHARGE_DISABLE(1) of from other
-			 * conditions such as taper control.
-			 */
-			if (gcpm->dc_state == DC_DISABLED)
-				gcpm->dc_state = DC_IDLE;
-
-			pr_info("%s: ChargeDisable value=%d dc_index=%d dc_state=%d\n",
-				__func__, pval->intval, gcpm->dc_index, gcpm->dc_state);
-
-			gcpm_pps_online(gcpm);
-			ta_check = true;
-		}
-
-		break;
-	case POWER_SUPPLY_PROP_ONLINE:
-		pr_info("%s: ONLINE value=%d dc_index=%d dc_state=%d\n",
-			__func__, pval->intval, gcpm->dc_index,
-			gcpm->dc_state);
-		ta_check = true;
-		break;
-
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		psp = POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX;
-		fallthrough;
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
-		ta_check = gcpm->fv_uv != pval->intval;
-		gcpm->fv_uv = pval->intval;
-		break;
-
-	/*
-	 * from google_charger (usually) with demand adjusted by classic
-	 * thermal engine and/or special charging profiles.
-	 * The MDIS vote on MSC_FCC is disabled by the thermal
-	 *
-	 * Used by the select logic to determine the best charging strategy and
-	 * either routed to the main-charger directly or voted on GCPM_FCC.
-	 */
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-		route = !gcpm_chg_is_cp_active(gcpm);
-		ta_check = gcpm->cc_max != pval->intval;
-		pr_debug("%s: route=%d ta_check=%d cc_max=%d->%d dc_index=%d\n",
-			 __func__, route, ta_check, gcpm->cc_max, pval->intval,
-			 gcpm->dc_index);
-		gcpm->cc_max = pval->intval;
-		break;
-
-	/* just route to the active charger */
-	default:
-		break;
-	}
 
 	/* used only for debug */
 	if (gcpm->new_dc_limit) {
@@ -2098,6 +1966,65 @@ done:
 	if (psp == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX)
 		gcpm_update_gcpm_fcc(gcpm, "CC_MAX", gcpm->cc_max, !route);
 
+	return ret;
+}
+
+static int gcpm_psy_set_property(struct power_supply *psy,
+				 enum power_supply_property psp,
+				 const union power_supply_propval *pval)
+{
+	struct gcpm_drv *gcpm = power_supply_get_drvdata(psy);
+	bool ta_check = false;
+	bool route = true;
+	int ret = 0;
+
+	pm_runtime_get_sync(gcpm->device);
+	if (!gcpm->init_complete || !gcpm->resume_complete) {
+		pm_runtime_put_sync(gcpm->device);
+		return -EAGAIN;
+	}
+	pm_runtime_put_sync(gcpm->device);
+
+	mutex_lock(&gcpm->chg_psy_lock);
+
+	switch (psp) {
+	/* do not route to the active charger */
+	case POWER_SUPPLY_PROP_ONLINE:
+		pr_info("%s: ONLINE value=%d dc_index=%d dc_state=%d\n",
+			__func__, pval->intval, gcpm->dc_index,
+			gcpm->dc_state);
+		ta_check = true;
+		break;
+
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+		ta_check = gcpm->fv_uv != pval->intval;
+		gcpm->fv_uv = pval->intval;
+		break;
+
+	/*
+	 * from google_charger (usually) with demand adjusted by classic
+	 * thermal engine and/or special charging profiles.
+	 * The MDIS vote on MSC_FCC is disabled by the thermal
+	 *
+	 * Used by the select logic to determine the best charging strategy and
+	 * either routed to the main-charger directly or voted on GCPM_FCC.
+	 */
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		route = !gcpm_chg_is_cp_active(gcpm);
+		ta_check = gcpm->cc_max != pval->intval;
+		pr_debug("%s: route=%d ta_check=%d cc_max=%d->%d dc_index=%d\n",
+			 __func__, route, ta_check, gcpm->cc_max, pval->intval,
+			 gcpm->dc_index);
+		gcpm->cc_max = pval->intval;
+		break;
+
+	/* just route to the active charger */
+	default:
+		break;
+	}
+
+	ret = gcpm_set_active_charger(gcpm, psp, pval, ta_check, route);
+
 	mutex_unlock(&gcpm->chg_psy_lock);
 
 	/* the charger should not call into gcpm: this can change though */
@@ -2109,7 +2036,6 @@ static int gcpm_psy_get_property(struct power_supply *psy,
 				 union power_supply_propval *pval)
 {
 	struct gcpm_drv *gcpm = power_supply_get_drvdata(psy);
-	union gbms_charger_state chg_state;
 	struct power_supply *chg_psy;
 	bool route = false;
 	int ret = 0;
@@ -2131,12 +2057,6 @@ static int gcpm_psy_get_property(struct power_supply *psy,
 	}
 
 	switch (psp) {
-	/* handle locally for now */
-	case GBMS_PROP_CHARGE_CHARGER_STATE:
-		chg_state.v = gcpm_get_charger_state(gcpm, chg_psy);
-		gbms_propval_int64val(pval) = chg_state.v;
-		break;
-
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		pval->intval = gcpm->cc_max;
 		break;
@@ -2166,6 +2086,197 @@ static int gcpm_psy_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		return 1;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int gcpm_gbms_psy_set_property(struct power_supply *psy,
+				      enum gbms_property psp,
+				      const union gbms_propval *pval)
+{
+	struct gcpm_drv *gcpm = power_supply_get_drvdata(psy);
+	bool ta_check = false;
+	bool route = true;
+	int ret = 0;
+
+	pm_runtime_get_sync(gcpm->device);
+	if (!gcpm->init_complete || !gcpm->resume_complete) {
+		pm_runtime_put_sync(gcpm->device);
+		return -EAGAIN;
+	}
+	pm_runtime_put_sync(gcpm->device);
+
+	mutex_lock(&gcpm->chg_psy_lock);
+	switch (psp) {
+	/* do not route to the active charger */
+	case GBMS_PROP_TAPER_CONTROL: {
+		int count = 0;
+
+		if (pval->prop.intval != GBMS_TAPER_CONTROL_OFF)
+			count = gcpm->taper_step_count + gcpm->taper_step_grace;
+
+		/* ta_check is set when taper control changes value */
+		ta_check = gcpm_taper_ctl(gcpm, count);
+		route = false;
+	} break;
+
+	/* route to the active charger in most cases */
+	case GBMS_PROP_CHARGE_DISABLE:
+
+		/* google_charger send this on disconnect and input_suspend. */
+		pr_info("%s: ChargeDisable value=%d dc_index=%d dc_state=%d\n",
+			__func__, pval->prop.intval, gcpm->dc_index, gcpm->dc_state);
+
+		if (pval->prop.intval) {
+			/*
+			 * more or less the same as gcpm_pps_wlc_dc_work() when
+			 * dc_index <= 0. But the default charger must not be
+			 * restarted in this case though.
+			 * TODO: factor the code with gcpm_pps_wlc_dc_work().
+			 */
+
+			/*
+			 * No op if the current source is not DC (uncluding
+			 * stop while in DC_ENABLE_), ->dc_state
+			 * will be DC_DISABLED if this was actually disabled.
+			 */
+			ret = gcpm_dc_stop(gcpm,  gcpm->chg_psy_active);
+			if (ret == -EAGAIN) {
+				pr_debug("%s: cannot disable, try again\n", __func__);
+				mutex_unlock(&gcpm->chg_psy_lock);
+				return -EAGAIN;
+			}
+
+			ret = gcpm_pps_offline(gcpm);
+			if (ret < 0)
+				pr_debug("%s: fail 2 offline pps, dc_state=%d (%d)\n",
+					__func__, gcpm->dc_state, ret);
+
+			/* reset to the default charger, and clear taper */
+			gcpm->dc_index = GCPM_DEFAULT_CHARGER;
+			gcpm_taper_ctl(gcpm, 0);
+
+			/*
+			 * no-op if dc was NOT running, set online the charger
+			 * but do not start it otherwise.
+			 */
+			ret = gcpm_chg_start(gcpm, GCPM_DEFAULT_CHARGER,
+					     gcpm->fv_uv, gcpm->cc_max);
+			if (ret < 0)
+				pr_err("%s: cannot start default (%d)\n",
+				       __func__, ret);
+
+			pr_info("%s: ChargeDisable value=%d dc_index=%d dc_state=%d\n",
+				__func__, pval->prop.intval, gcpm->dc_index, gcpm->dc_state);
+
+			/*
+			 * route = true so active will get the property.
+			 * No need to re-check the TA selection on disable.
+			 */
+			ta_check = false;
+		} else if (gcpm->dc_state <= DC_IDLE) {
+			/*
+			 * ->dc_state will be DC_DISABLED if DC was disabled
+			 * via GBMS_PROP_CHARGE_DISABLE(1) of from other
+			 * conditions such as taper control.
+			 */
+			if (gcpm->dc_state == DC_DISABLED)
+				gcpm->dc_state = DC_IDLE;
+
+			pr_info("%s: ChargeDisable value=%d dc_index=%d dc_state=%d\n",
+				__func__, pval->prop.intval, gcpm->dc_index, gcpm->dc_state);
+
+			gcpm_pps_online(gcpm);
+			ta_check = true;
+		}
+
+		break;
+
+	case POWER_SUPPLY_PROP_ONLINE:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		pr_debug("%s: route to gcpm_psy_set_property, psp:%d\n", __func__, psp);
+		mutex_unlock(&gcpm->chg_psy_lock);
+		return -ENODATA;
+
+	/* just route to the active charger */
+	default:
+		break;
+	}
+
+	ret = gcpm_set_active_charger(gcpm, psp, &pval->prop, ta_check, route);
+
+	mutex_unlock(&gcpm->chg_psy_lock);
+
+	/* the charger should not call into gcpm: this can change though */
+	return ret;
+}
+
+static int gcpm_gbms_psy_get_property(struct power_supply *psy,
+				      enum gbms_property psp,
+				      union gbms_propval *pval)
+{
+	struct gcpm_drv *gcpm = power_supply_get_drvdata(psy);
+	union gbms_charger_state chg_state;
+	struct power_supply *chg_psy;
+	bool route = false;
+	int ret = 0;
+
+	pm_runtime_get_sync(gcpm->device);
+	if (!gcpm->init_complete || !gcpm->resume_complete) {
+		pm_runtime_put_sync(gcpm->device);
+		return -EAGAIN;
+	}
+	pm_runtime_put_sync(gcpm->device);
+
+	mutex_lock(&gcpm->chg_psy_lock);
+	chg_psy = gcpm_chg_get_active(gcpm);
+	if (!chg_psy) {
+		pr_err("invalid active charger = %d for prop=%d\n",
+			gcpm->chg_psy_active, psp);
+		mutex_unlock(&gcpm->chg_psy_lock);
+		return -ENODEV;
+	}
+
+	switch (psp) {
+	/* handle locally for now */
+	case GBMS_PROP_CHARGE_CHARGER_STATE:
+		chg_state.v = gcpm_get_charger_state(gcpm, chg_psy);
+		pval->int64val = chg_state.v;
+		break;
+
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+		pr_debug("%s: route to gcpm_psy_get_property, psp:%d\n", __func__, psp);
+		ret = -ENODATA;
+		break;
+
+	/* route to the active charger */
+	default:
+		route = true;
+		break;
+	}
+
+	if (route)
+		pval->prop.intval = GPSY_GET_INT_PROP(chg_psy, psp, &ret);
+
+	mutex_unlock(&gcpm->chg_psy_lock);
+	return ret;
+}
+
+static int gcpm_gbms_psy_is_writeable(struct power_supply *psy,
+				      enum gbms_property psp)
+{
+	switch (psp) {
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+	case GBMS_PROP_CHARGING_ENABLED:
 	case GBMS_PROP_CHARGE_DISABLE:
 	case GBMS_PROP_TAPER_CONTROL:
 		return 1;
@@ -2192,14 +2303,18 @@ static enum power_supply_property gcpm_psy_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
 };
 
-static struct power_supply_desc gcpm_psy_desc = {
-	.name = "gcpm",
-	.type = POWER_SUPPLY_TYPE_UNKNOWN,
-	.get_property = gcpm_psy_get_property,
-	.set_property = gcpm_psy_set_property,
-	.property_is_writeable = gcpm_psy_is_writeable,
-	.properties = gcpm_psy_properties,
-	.num_properties = ARRAY_SIZE(gcpm_psy_properties),
+static struct gbms_desc gcpm_psy_desc = {
+	.psy_dsc.name = "gcpm",
+	.psy_dsc.type = POWER_SUPPLY_TYPE_UNKNOWN,
+	.psy_dsc.get_property = gcpm_psy_get_property,
+	.psy_dsc.set_property = gcpm_psy_set_property,
+	.psy_dsc.property_is_writeable = gcpm_psy_is_writeable,
+	.get_property = gcpm_gbms_psy_get_property,
+	.set_property = gcpm_gbms_psy_set_property,
+	.property_is_writeable = gcpm_gbms_psy_is_writeable,
+	.psy_dsc.properties = gcpm_psy_properties,
+	.psy_dsc.num_properties = ARRAY_SIZE(gcpm_psy_properties),
+	.forward = true,
 };
 
 #define gcpm_psy_changed_tickle_pps(gcpm) \
@@ -4027,9 +4142,9 @@ static int google_cpm_probe(struct platform_device *pdev)
 	ret = of_property_read_string(pdev->dev.of_node, "google,psy-name",
 				      &tmp_name);
 	if (ret == 0) {
-		gcpm_psy_desc.name = devm_kstrdup(&pdev->dev, tmp_name,
+		gcpm_psy_desc.psy_dsc.name = devm_kstrdup(&pdev->dev, tmp_name,
 						  GFP_KERNEL);
-		if (!gcpm_psy_desc.name)
+		if (!gcpm_psy_desc.psy_dsc.name)
 			return -ENOMEM;
 	}
 
@@ -4215,7 +4330,7 @@ static int google_cpm_probe(struct platform_device *pdev)
 	psy_cfg.drv_data = gcpm;
 	psy_cfg.of_node = pdev->dev.of_node;
 	gcpm->psy = devm_power_supply_register(gcpm->device,
-					       &gcpm_psy_desc,
+					       &gcpm_psy_desc.psy_dsc,
 					       &psy_cfg);
 	if (IS_ERR(gcpm->psy)) {
 		ret = PTR_ERR(gcpm->psy);
