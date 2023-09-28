@@ -941,9 +941,27 @@ static int sw5100_psy_get_property(struct power_supply *psy,
 		pval->intval = sw5100_get_batt_present(bms);
 		break;
 	case GBMS_PROP_CAPACITY_RAW:
-		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_REAL_CAPACITY, &ivalue);
-		if (rc == 0)
+		// First query for monotonic SOC value.
+		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);
+		if (rc == 0) {
+			// By default we use the monotonic SOC; this prevents
+			// any erroneous 0 SOC values due to any of the
+			// following calls failing.
 			pval->intval = (scale_capacity(bms, ivalue) << 8);
+			if (ivalue == 100) {
+				// monotonic SOC is 100%, now check if
+				// battery offline and idling
+				rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CURRENT_NOW, &ivalue);
+				if (rc == 0 && ivalue == 0) {
+					// use sys_soc as our SOC for
+					// recharge tracking.
+					rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_REAL_CAPACITY, &ivalue);
+					if (rc == 0) {
+						pval->intval = (scale_capacity(bms, ivalue) << 8);
+					}
+				}
+			}
+		}
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = sw5100_get_prop_from_bms(bms, SW5100_QBG_CAPACITY, &ivalue);

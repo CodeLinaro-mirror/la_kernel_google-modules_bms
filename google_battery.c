@@ -795,7 +795,14 @@ static qnum_t ssoc_rl_max_delta(const struct batt_ssoc_rl_state *rls,
 				int bucken, ktime_t delta_time)
 {
 	int i;
-	const qnum_t max_delta = div_u64(((qnumd_t)rls->rl_delta_max_soc * delta_time),
+	qnum_t max_delta;
+
+	if (delta_time > rls->rl_delta_max_time &&
+		((qnum_toint(rls->rl_delta_max_soc) * delta_time) / rls->rl_delta_max_time) > 100) {
+		return qnum_fromint(100);
+	}
+
+	max_delta = div_u64(((qnumd_t)rls->rl_delta_max_soc * delta_time),
 				  (rls->rl_delta_max_time ? rls->rl_delta_max_time : 1));
 
 	if (rls->rl_fast_track)
@@ -837,7 +844,7 @@ static qnum_t ssoc_apply_rl(struct batt_ssoc_state *ssoc)
 	} else {
 		qnum_t step;
 		const ktime_t delta_time = now - rls->rl_ssoc_last_update;
-		const ktime_t max_delta = ssoc_rl_max_delta(rls,
+		const qnum_t max_delta = ssoc_rl_max_delta(rls,
 							   ssoc->buck_enabled,
 							   delta_time);
 
@@ -1059,7 +1066,7 @@ static int fan_bt_calculate_level(const struct batt_drv *batt_drv)
 	int level, temp, ret;
 
 	ret = gbatt_get_temp(batt_drv, &temp);
-	if (ret < 0) {
+	if (ret != 0) {
 
 		if (batt_drv->temp_idx < 2)
 			level = FAN_LVL_NOT_CARE;
@@ -2504,7 +2511,7 @@ static int batt_calc_charging_speed(struct batt_drv *batt_drv)
 
 	/* Get nominal demand current via ttf table */
 	nominal_demand = ttf_ref_cc(&batt_drv->ttf_stats, soc);
-	if (nominal_demand < 0)
+	if (nominal_demand <= 0)
 		return -1;
 
 	/*
@@ -6331,6 +6338,7 @@ static ssize_t aacr_state_store(struct device *dev,
 	switch (val) {
 	case BATT_AACR_DISABLED:
 		state = BATT_AACR_DISABLED;
+		algo = BATT_AACR_DISABLED;
 		break;
 	case BATT_AACR_ENABLED:
 		state = BATT_AACR_ENABLED;
