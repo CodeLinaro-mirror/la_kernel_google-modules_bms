@@ -787,7 +787,7 @@ EXPORT_SYMBOL_GPL(gbms_chg_stats_tier);
 
 	if (chg_state->f.chg_type == POWER_SUPPLY_CHARGE_TYPE_FAST) {
 		tier->time_fast += elap;
-	} else if (chg_state->f.chg_type == POWER_SUPPLY_CHARGE_TYPE_TAPER) {
+	} else if (chg_state->f.chg_type == POWER_SUPPLY_CHARGE_TYPE_TAPER_EXT) {
 		tier->time_taper += elap;
 	} else {
 		tier->time_other += elap;
