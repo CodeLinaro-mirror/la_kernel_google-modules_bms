@@ -49,7 +49,7 @@ struct gbms_cache_entry {
 
 #define GBMS_PROVIDER_NAME_MAX	32
 
-#define GBMS_PROVIDERS_MAX	4
+#define GBMS_PROVIDERS_MAX	5
 static spinlock_t providers_lock;
 static bool gbms_storage_init_done;
 
@@ -1100,7 +1100,7 @@ enum gbee_status {
 	GBEE_STATUS_OK,
 };
 
-#define GBEE_POLL_RETRIES	5
+#define GBEE_POLL_RETRIES	15
 #define GBEE_POLL_INTERVAL_MS	200
 
 /* only one battery eeprom for now */
