@@ -822,11 +822,11 @@ static int sw5100_get_batt_present(struct bms_dev *bms)
 /** Given a SOC percentage aka capacity we're going to scale 5-100 to 0-100. */
 static int scale_capacity(struct bms_dev const *bms, int capacity)
 {
-	if (bms->soc_shutdown_offset > 0) {
+	if ((bms->soc_shutdown_offset > 0) && (bms->soc_shutdown_offset < 100)) {
 		if (capacity >= 100) {
 			return 100;
 		} else if (capacity >= bms->soc_shutdown_offset) {
-			return (((capacity - bms->soc_shutdown_offset) * 100) /
+			return DIV_ROUND_UP(((capacity - bms->soc_shutdown_offset) * 100),
 				(100 - bms->soc_shutdown_offset));
 		} else {
 			return 0;
