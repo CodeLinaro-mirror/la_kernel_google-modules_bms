@@ -34,6 +34,7 @@
 #define LL_BPP_CEP_VOTER			"LL_BPP_CEP_VOTER"
 #define P9221_RAMP_VOTER			"WLC_RAMP_VOTER"
 #define P9221_HPP_VOTER				"EPP_HPP_VOTER"
+#define P9221_ALIGN_VOTER			"WLC_ALIGN_VOTER"
 #define WLC_MFG_GOOGLE				0x72
 #define WLC_MFG_108_FOR_GOOGLE			0x108
 #define P9221_DC_ICL_BPP_UA			700000
@@ -77,6 +78,7 @@
 #define P9221_NEG_POWER_10W		(10 * 2)
 #define P9221_PTMC_EPP_TX_1912		0x32
 #define P9221_PTMC_EPP_TX_4191		0x50
+#define P9221_PTMC_EPP_TX_1801		0x28
 
 #define P9222_RX_CALIBRATION_LIGHT_LOAD	0x5831
 #define P9222_LIGHT_LOAD_VALUE		0x0C
@@ -535,6 +537,8 @@
 
 #define P9412_HPP_FOD_SETS			8
 
+#define P9XXX_IOP_MFG_NUM			8
+
 /* RA9530 */
 
 #define RA9530_CHIP_ID				0x9530
@@ -670,20 +674,25 @@ struct p9221_charger_platform_data {
 	u8				fod[P9221R5_NUM_FOD];
 	u8				fod_epp[P9221R5_NUM_FOD];
 	u8				fod_epp_comp[P9221R5_NUM_FOD];
+	u8				fod_epp_iop[P9221R5_NUM_FOD];
 	u8				fod_hpp[P9221R5_NUM_FOD];
 	u8				fod_hpp_hv[P9221R5_NUM_FOD];
 	struct p9221_fod_data		hpp_fods[P9412_HPP_FOD_SETS];
 	int				fod_num;
 	int				fod_epp_num;
 	int				fod_epp_comp_num;
+	int				fod_epp_iop_num;
 	int				fod_hpp_num;
 	int				fod_hpp_hv_num;
 	bool				fod_fsw;
 	int				fod_fsw_high;
 	int				fod_fsw_low;
+	u16				fod_iop_mfg[P9XXX_IOP_MFG_NUM];
+	int				fod_iop_mfg_num;
 	int				q_value;
 	int				rf_value;
 	int				tx_4191q;
+	int				tx_1801q;
 	int				epp_rp_value;
 	int				epp_rp_low_value;
 	int				needs_dcin_reset;
@@ -696,6 +705,7 @@ struct p9221_charger_platform_data {
 	bool				has_wlc_dc;
 	bool				has_rtx;
 	u32				power_mitigate_threshold;
+	u32				power_mitigate_ac_threshold;
 	u32				alignment_scalar_low_current;
 	u32				alignment_scalar_high_current;
 	u32				alignment_offset_low_current;
@@ -717,6 +727,10 @@ struct p9221_charger_platform_data {
 	bool				ll_vout_not_set;
 	int				align_delta;
 	bool				disable_repeat_eop;
+	bool				bpp_cep_on_dl;
+	bool				hda_tz_wlc;
+	u32				set_iop_vout_bpp;
+	u32				set_iop_vout_epp;
 };
 
 struct p9221_charger_ints_bit {
@@ -769,6 +783,7 @@ struct p9221_charger_data {
 	struct gvotable_election	*csi_status_votable;
 	struct gvotable_election	*csi_type_votable;
 	struct gvotable_election	*point_full_ui_soc_votable;
+	struct gvotable_election	*hda_tz_votable;
 	struct notifier_block		nb;
 	struct mutex			io_lock;
 	struct mutex			cmd_lock;

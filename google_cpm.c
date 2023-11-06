@@ -2193,6 +2193,14 @@ static int gcpm_psy_get_property(struct power_supply *psy,
 		gbms_propval_int64val(pval) = chg_state.v;
 		break;
 
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		pval->intval = gcpm->cc_max;
+		break;
+
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+		pval->intval = gcpm->fv_uv;
+		break;
+
 	/* route to the active charger */
 	default:
 		route = true;
@@ -3527,21 +3535,21 @@ static void gcpm_init_work(struct work_struct *work)
 		gcpm->init_complete = true;
 	}
 
+	dc_not_done = (gcpm->tcpm_phandle && !gcpm->tcpm_psy) ||
+		      (gcpm->wlc_dc_name && !gcpm->wlc_dc_psy);
+
 	/* keep looking for late arrivals, TCPM and WLC if set */
-	if (found == gcpm->chg_psy_count)
+	if (found == gcpm->chg_psy_count && !dc_not_done)
 		gcpm->chg_psy_retries = 0;
 	else if (gcpm->chg_psy_retries)
 		gcpm->chg_psy_retries--;
-
-	dc_not_done = (gcpm->tcpm_phandle && !gcpm->tcpm_psy) ||
-		      (gcpm->wlc_dc_name && !gcpm->wlc_dc_psy);
 
 	pr_warn("%s retries=%d dc_not_done=%d tcpm_ok=%d wlc_ok=%d\n",
 		__func__, gcpm->chg_psy_retries, dc_not_done,
 		(!gcpm->tcpm_phandle || gcpm->tcpm_psy),
 		(!gcpm->wlc_dc_name || gcpm->wlc_dc_psy));
 
-	if (gcpm->chg_psy_retries || dc_not_done) {
+	if (gcpm->chg_psy_retries) {
 		const unsigned long jif = msecs_to_jiffies(INIT_RETRY_DELAY_MS);
 
 		schedule_delayed_work(&gcpm->init_work, jif);
