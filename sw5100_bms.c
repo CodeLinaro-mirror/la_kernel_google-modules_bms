@@ -119,6 +119,9 @@ struct bias_config {
 #define CHGR_USB_SUSPEND			0x2954
 #define USBIN_SUSPEND BIT(0)
 
+#define QBG_MAIN_QBG_STATE_FORCE_CMD		0x4F41
+#define FORCE_HIGH_POWER_SHIFT			2
+
 #define CHGR_FLOAT_VOLTAGE_BASE			3600000
 #define CHGR_CHARGE_CURRENT_STEP		25000
 
@@ -267,6 +270,7 @@ static irqreturn_t sw5100_chg_state_change_irq_handler(int irq, void *data)
 	struct bms_dev *chg = irq_data->parent_data;
 	u8 stat;
 	int rc;
+	u8 val;
 
 	dev_dbg(chg->dev, "IRQ: %s\n", irq_data->name);
 
@@ -277,6 +281,29 @@ static irqreturn_t sw5100_chg_state_change_irq_handler(int irq, void *data)
 	}
 
 	power_supply_changed(chg->psy);
+
+	switch (stat & CHGR_BATTERY_CHARGER_STATUS_MASK) {
+		case SW5100_FULLON_CHARGE:
+		case SW5100_TAPER_CHARGE:
+			/* Force fuel gauge update interval to high power mode. */
+			val = (1 << FORCE_HIGH_POWER_SHIFT);
+			rc = sw5100_write(chg->pmic_regmap, QBG_MAIN_QBG_STATE_FORCE_CMD, &val, 1);
+			if (rc < 0) {
+				dev_err(chg->dev, "Failure to force QBG HPM rc=%d\n", rc);
+			}
+			break;
+		case SW5100_TERMINATE_CHARGE:
+		case SW5100_PAUSE_CHARGE:
+		case SW5100_DISABLE_CHARGE:
+		case SW5100_INHIBIT_CHARGE:
+			/* Return to dynamic fuel gauge update interval. */
+			val = 0;
+			rc = sw5100_write(chg->pmic_regmap, QBG_MAIN_QBG_STATE_FORCE_CMD, &val, 1);
+			if (rc < 0) {
+				dev_err(chg->dev, "Failure to restore dynamic QBG update rc=%d\n", rc);
+			}
+			break;
+	}
 	return IRQ_HANDLED;
 }
 
