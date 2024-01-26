@@ -13,17 +13,21 @@ filegroup(
         "//private/google-modules/bms:__subpackages__",
         "//private/google-modules/power/reset:__subpackages__",
         "//private/google-modules/soc/gs:__pkg__",
+        "//private/google-modules/soc/msm:__pkg__",
+        "//private/google-modules/soc/msm/drivers/power/supply/google:__pkg__",
+        "//private/msm-google/drivers/power/supply/qcom:__pkg__",
     ],
 )
 
 filegroup(
     name = "bms-misc.kconfig",
-    srcs = glob([
+    srcs = [
         "Kconfig",
-    ]),
+    ],
     visibility = [
         "//private/devices/google:__subpackages__",
         "//private/google-modules/soc/gs:__pkg__",
+        "//private/google-modules/soc/msm:__pkg__",
     ],
 )
 
@@ -32,17 +36,21 @@ kernel_module(
     srcs = glob([
         "**/*.c",
         "**/*.h",
+    ]) + [
         "Kbuild",
-    ]),
+    ],
     outs = [
         "gvotable.ko",
         "logbuffer.ko",
     ],
-    kernel_build = "//private/google-modules/soc/gs:gs_kernel_build",
+    kernel_build = "//private/google-modules/soc/msm:msm_kernel_build",
     visibility = [
         "//private/devices/google:__subpackages__",
         "//private/google-modules/bluetooth/broadcom:__subpackages__",
         "//private/google-modules/bms:__subpackages__",
         "//private/google-modules/soc/gs:__pkg__",
+        "//private/google-modules/soc/msm:__pkg__",
+        "//private/google-modules/soc/msm/drivers/power/supply/google:__pkg__",
+        "//private/msm-google/drivers/power/supply/qcom:__pkg__",
     ],
 )
