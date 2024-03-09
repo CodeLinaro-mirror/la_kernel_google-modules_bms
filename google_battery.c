@@ -184,6 +184,12 @@ struct batt_ssoc_state {
 	/* Save/Restore fake capacity */
 	bool save_soc_available;
 	u16 save_soc;
+
+	/* For case that the first soc is not accurate */
+	bool ignore_pon_soc;
+	qnum_t soc_first;
+	bool   soc_first_recorded;
+	bool   soc_first_obsolete;
 };
 
 struct gbatt_ccbin_data {
@@ -974,6 +980,21 @@ static void ssoc_update(struct batt_ssoc_state *ssoc, qnum_t soc)
 	ssoc->ssoc_rl = ssoc_apply_rl(ssoc);
 }
 
+
+static void ssoc_change_curve_at_gdf(struct batt_ssoc_state *ssoc_state,
+				     qnum_t gdf, qnum_t capacity,
+				     enum ssoc_uic_type type)
+{
+	struct ssoc_uicurve *new_curve;
+
+	new_curve = (type == SSOC_UIC_TYPE_DSG) ? dsg_curve : chg_curve;
+	ssoc_uicurve_dup(ssoc_state->ssoc_curve, new_curve);
+	ssoc_state->ssoc_curve_type = type;
+
+	/* splice at (->ssoc_gdf,->ssoc_rl) because past spoof */
+	ssoc_uicurve_splice(ssoc_state->ssoc_curve, gdf, capacity);
+}
+
 /*
  * Maxim could need:
  *	1fh AvCap, 10h FullCap. 23h FullCapNom
@@ -1004,22 +1025,21 @@ static int ssoc_work(struct batt_ssoc_state *ssoc_state,
 	 */
 	soc_raw = qnum_from_q8_8(soc_q8_8);
 
+	if (ssoc_state->ignore_pon_soc && !ssoc_state->soc_first_obsolete) {
+		if (!ssoc_state->soc_first_recorded) {
+			ssoc_state->soc_first = soc_raw;
+			ssoc_state->soc_first_recorded = true;
+		} else if (soc_raw != ssoc_state->soc_first) {
+			ssoc_state->soc_first_obsolete = true;
+			/* set ssoc_state to restart the calculate */
+			ssoc_state->ssoc_rl_state.rl_ssoc_target = -1;
+			/* reset the curve */
+			ssoc_change_curve_at_gdf(ssoc_state, soc_raw, soc_raw,
+						 ssoc_state->ssoc_curve_type);
+		}
+	}
 	ssoc_update(ssoc_state, soc_raw);
 	return 0;
-}
-
-static void ssoc_change_curve_at_gdf(struct batt_ssoc_state *ssoc_state,
-				     qnum_t gdf, qnum_t capacity,
-				     enum ssoc_uic_type type)
-{
-	struct ssoc_uicurve *new_curve;
-
-	new_curve = (type == SSOC_UIC_TYPE_DSG) ? dsg_curve : chg_curve;
-	ssoc_uicurve_dup(ssoc_state->ssoc_curve, new_curve);
-	ssoc_state->ssoc_curve_type = type;
-
-	/* splice at (->ssoc_gdf,->ssoc_rl) because past spoof */
-	ssoc_uicurve_splice(ssoc_state->ssoc_curve, gdf, capacity);
 }
 
 /*
@@ -8699,6 +8719,9 @@ static void google_battery_init_work(struct work_struct *work)
 		if (ret == 0)
 			batt_drv->sd.is_enable = true;
 	}
+
+	batt_drv->ssoc_state.ignore_pon_soc = of_property_read_bool(node,
+						"google,batt-ignore-pon-soc");
 
 	ret = batt_init_sd(&batt_drv->sd);
 	if (ret < 0) {
