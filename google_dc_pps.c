@@ -32,8 +32,6 @@
 
 #define PPS_UPDATE_DELAY_MS		2000
 
-#define get_boot_sec() div_u64(ktime_to_ns(ktime_get_boottime()), NSEC_PER_SEC)
-
 void pps_log(struct pd_pps_data *pps, const char *fmt, ...)
 {
 	va_list args;
@@ -503,7 +501,7 @@ static int pps_init_snk(struct pd_pps_data *pps_data,
  * pps_data->nr_snk_pdo == 0 means no PPS
  */
 int pps_init(struct pd_pps_data *pps_data, struct device *dev,
-	     struct power_supply *pps_psy)
+	     struct power_supply *pps_psy, const char *pps_ws_name)
 {
 	int ret;
 
@@ -529,8 +527,7 @@ int pps_init(struct pd_pps_data *pps_data, struct device *dev,
 	pps_data->stay_awake = of_property_read_bool(dev->of_node,
 						     "google,pps-awake");
 	if (pps_data->stay_awake) {
-		pps_data->pps_ws = wakeup_source_register(NULL,
-							  pps_name(pps_psy));
+		pps_data->pps_ws = wakeup_source_register(NULL, pps_ws_name);
 		if (!pps_data->pps_ws) {
 			dev_err(dev, "Failed to register wakeup source\n");
 			return -ENODEV;

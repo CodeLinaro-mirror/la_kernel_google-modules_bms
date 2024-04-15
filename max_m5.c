@@ -419,7 +419,7 @@ int max_m5_reset_state_data(struct max_m5_data *m5_data)
 	if (ret < 0)
 		dev_warn(m5_data->dev, "Erase GMSR fail (%d)\n", ret);
 
-	return ret;
+	return ret == sizeof(data) ? 0 : ret;
 }
 
 int max_m5_needs_reset_model_data(const struct max_m5_data *m5_data)
@@ -455,40 +455,11 @@ static int max_m5_period2caplsb(u16 taskperiod)
 	return cap_lsb;
 }
 
-/* 0 is ok */
-int max_m5_load_gauge_model(struct max_m5_data *m5_data)
+static int max_m5_update_gauge_custom_parameters(struct max_m5_data *m5_data)
 {
 	struct max17x0x_regmap *regmap = m5_data->regmap;
 	int ret, retries;
 	u16 data;
-
-	if (!regmap)
-		return -EIO;
-
-	if (!m5_data || !m5_data->custom_model || !m5_data->custom_model_size)
-		return -ENODATA;
-
-	/* check FStat.DNR to wait it clear for data ready */
-	for (retries = 20; retries > 0; retries--) {
-		ret = REGMAP_READ(regmap, MAX_M5_FSTAT, &data);
-		if (ret == 0 && !(data & MAX_M5_FSTAT_DNR))
-			break;
-		msleep(50);
-	}
-	dev_info(m5_data->dev, "retries:%d, FSTAT:%#x\n", retries, data);
-
-	/* loading in progress, this is not good (tm) */
-	ret = REGMAP_READ(regmap, MAX_M5_CONFIG2, &data);
-	if (ret == 0 && (data & MAX_M5_CONFIG2_LDMDL)) {
-		dev_err(m5_data->dev, "load model in progress (%x)\n", data);
-		return -EINVAL;
-	}
-
-	ret = max_m5_update_custom_model(m5_data);
-	if (ret < 0) {
-		dev_err(m5_data->dev, "cannot update custom model (%d)\n", ret);
-		return ret;
-	}
 
 	/* write parameters (which include state) */
 	ret = max_m5_update_custom_parameters(m5_data);
@@ -546,24 +517,112 @@ int max_m5_load_gauge_model(struct max_m5_data *m5_data)
 
 		ret = REGMAP_READ(regmap, MAX_M5_CONFIG2, &data);
 		if (ret == 0 && !(data & MAX_M5_CONFIG2_LDMDL)) {
-			int temp;
+			ret = REGMAP_READ(regmap, MAX_M5_REPCAP, &data);
+			if (ret == 0 && data != 0) {
+				int temp;
 
-			temp = max_m5_model_read_version(m5_data);
-			if (m5_data->model_version == MAX_M5_INVALID_VERSION) {
-				dev_info(m5_data->dev, "No Model Version, Current %x\n",
-					 temp);
-			} else if (temp != m5_data->model_version) {
-				dev_info(m5_data->dev, "Model Version %x, Mismatch %x\n",
-					 m5_data->model_version, temp);
-				return -EINVAL;
+				temp = max_m5_model_read_version(m5_data);
+				if (m5_data->model_version == MAX_M5_INVALID_VERSION) {
+					dev_info(m5_data->dev, "No Model Version, Current %x\n",
+						 temp);
+				} else if (temp != m5_data->model_version) {
+					dev_info(m5_data->dev, "Model Version %x, Mismatch %x\n",
+						 m5_data->model_version, temp);
+					return -EINVAL;
+				}
+
+				return 0;
 			}
-
-			return 0;
 		}
-
 	}
 
 	return -ETIMEDOUT;
+}
+
+/* protected from mutex_lock(&chip->model_lock) */
+static int max_m5_check_model_parameters(struct max_m5_data *m5_data)
+{
+	struct max_m5_custom_parameters *cp = &m5_data->parameters;
+	struct max17x0x_regmap *regmap = m5_data->regmap;
+	int ret, cap_delta_threshold, cap_delta_real;
+	u16 fullcaprep, fullcapnom;
+
+	/* b/240115405#comment44 */
+	cap_delta_threshold = abs(cp->fullcapnom - cp->fullcaprep) + cp->designcap / 100;
+
+	ret = REGMAP_READ(regmap, MAX_M5_FULLCAPREP, &fullcaprep);
+	if (ret < 0)
+		return ret;
+
+	ret = REGMAP_READ(regmap, MAX_M5_FULLCAPNOM, &fullcapnom);
+	if (ret < 0)
+		return ret;
+
+	cap_delta_real = abs(fullcapnom - fullcaprep);
+
+	dev_info(m5_data->dev, "write: nom:%#x, rep:%#x, design:%#x (threshold=%d),"
+		 " read: nom:%#x, rep:%#x (delta=%d), retry:%d\n",
+		 cp->fullcapnom, cp->fullcaprep, cp->designcap, cap_delta_threshold,
+		 fullcapnom, fullcaprep, cap_delta_real, m5_data->load_retry);
+
+	if (cap_delta_real > cap_delta_threshold && m5_data->load_retry < MAX_M5_RETRY_TIMES)
+		return -ERANGE;
+
+	return 0;
+}
+
+/* 0 is ok , protected from mutex_lock(&chip->model_lock) in max7102x_battery.c */
+int max_m5_load_gauge_model(struct max_m5_data *m5_data)
+{
+	struct max17x0x_regmap *regmap = m5_data->regmap;
+	int ret, retries;
+	u16 data;
+
+	if (!regmap)
+		return -EIO;
+
+	if (!m5_data || !m5_data->custom_model || !m5_data->custom_model_size)
+		return -ENODATA;
+
+	/* check FStat.DNR to wait it clear for data ready */
+	for (retries = 20; retries > 0; retries--) {
+		ret = REGMAP_READ(regmap, MAX_M5_FSTAT, &data);
+		if (ret == 0 && !(data & MAX_M5_FSTAT_DNR))
+			break;
+		msleep(50);
+	}
+	dev_info(m5_data->dev, "retries:%d, FSTAT:%#x\n", retries, data);
+
+	/* loading in progress, this is not good (tm) */
+	ret = REGMAP_READ(regmap, MAX_M5_CONFIG2, &data);
+	if (ret == 0 && (data & MAX_M5_CONFIG2_LDMDL)) {
+		dev_err(m5_data->dev, "load model in progress (%x)\n", data);
+		return -EINVAL;
+	}
+
+	ret = max_m5_update_custom_model(m5_data);
+	if (ret < 0) {
+		dev_err(m5_data->dev, "cannot update custom model (%d)\n", ret);
+		return ret;
+	}
+
+	do {
+		msleep(500);
+
+		ret = max_m5_update_gauge_custom_parameters(m5_data);
+		if (ret < 0)
+			return ret;
+
+		ret = max_m5_check_model_parameters(m5_data);
+		if (ret < 0) {
+			m5_data->load_retry++;
+		} else {
+			m5_data->load_retry = 0;
+			break;
+		}
+	} while (m5_data->load_retry < MAX_M5_RETRY_TIMES);
+
+	return ret;
 }
 
 /* algo version is ignored here, check code in max1720x_outliers */
@@ -591,9 +650,13 @@ static bool memtst(void *buf, char c, size_t count)
 	return same;
 }
 
-static int max_m5_check_state_data(struct model_state_save *state)
+/* TODO: make it adjustable, set 10% tolerance here */
+#define MAX_M5_CAP_MAX_RATIO	110
+static int max_m5_check_state_data(struct model_state_save *state,
+				   struct max_m5_custom_parameters *ini)
 {
 	bool bad_residual, empty;
+	int max_cap = ini->designcap * MAX_M5_CAP_MAX_RATIO / 100;
 
 	empty = memtst(state, 0xff, sizeof(*state));
 	if (empty)
@@ -612,6 +675,12 @@ static int max_m5_check_state_data(struct model_state_save *state)
 
 	if (bad_residual)
 		return -EINVAL;
+
+	if (state->fullcaprep > max_cap)
+		return -ERANGE;
+
+	if (state->fullcapnom > max_cap)
+		return -ERANGE;
 
 	return 0;
 }
@@ -661,7 +730,7 @@ int max_m5_load_state_data(struct max_m5_data *m5_data)
 		return ret;
 	}
 
-	ret = max_m5_check_state_data(&m5_data->model_save);
+	ret = max_m5_check_state_data(&m5_data->model_save, cp);
 	if (ret < 0)
 		return ret;
 
@@ -677,6 +746,14 @@ int max_m5_load_state_data(struct max_m5_data *m5_data)
 	cp->qresidual10 = m5_data->model_save.qresidual10;
 	cp->qresidual20 = m5_data->model_save.qresidual20;
 	cp->qresidual30 = m5_data->model_save.qresidual30;
+	/* b/278492168 restore dpacc with fullcapnom for taskperiod=351ms */
+	if (cp->taskperiod == 0x2d00 && cp->dpacc == 0x3200)
+		cp->dqacc = cp->fullcapnom >> 2;
+	else if (cp->taskperiod == 0x2d00 && cp->dpacc == 0x0c80)
+		cp->dqacc = cp->fullcapnom >> 4;
+	else
+		dev_warn(m5_data->dev, "taskperiod:%#x, dpacc:%#x, dqacc:%#x\n",
+			 cp->taskperiod, cp->dpacc, cp->dqacc);
 
 	m5_data->cycles = m5_data->model_save.cycles;
 	m5_data->cv_mixcap = m5_data->model_save.cv_mixcap;
@@ -816,6 +893,11 @@ int max_m5_model_read_state(struct max_m5_data *m5_data)
 				 &m5_data->parameters.cgain);
 
 	return rc;
+}
+
+int max_m5_get_designcap(const struct max_m5_data *m5_data)
+{
+	return m5_data->parameters.designcap;
 }
 
 ssize_t max_m5_model_state_cstr(char *buf, int max,
@@ -1044,6 +1126,17 @@ int max_m5_fg_model_cstr(char *buf, int max, const struct max_m5_data *m5_data)
 				 m5_data->custom_model[i]);
 
 	return len;
+}
+
+int max_m5_get_rc_switch_param(struct max_m5_data *m5_data, u16 *rc2_tempco, u16 *rc2_learncfg)
+{
+	if (m5_data->parameters.tempco <= 0 || m5_data->parameters.learncfg <= 0)
+		return -EINVAL;
+
+	*rc2_tempco = m5_data->parameters.tempco;
+	*rc2_learncfg = m5_data->parameters.learncfg;
+
+	return 0;
 }
 
 /* custom model parameters */

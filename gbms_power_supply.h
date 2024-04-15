@@ -88,6 +88,11 @@ enum gbms_property {
 	GBMS_PROP_BATTERY_AGE,		/* GBMS time in field */
 	GBMS_PROP_CAPACITY_FADE_RATE,	/* GBMS capaciy fade rate */
 	GBMS_PROP_CHARGE_FULL_ESTIMATE,	/* GBMS google_capacity */
+	GBMS_PROP_WLC_OP_FREQ,		/* GBMS wlc frequency */
+	GBMS_PROP_WLC_VRECT,		/* GBMS wlc Vrect */
+	GBMS_PROP_FG_REG_LOGGING,	/* GBMS FG logging */
+	GBMS_PROP_WLC_VCPOUT,		/* GBMS wlc cpout voltage */
+	GBMS_PROP_BATT_ID,              /* GBMS battery id */
 };
 
 union gbms_propval {
