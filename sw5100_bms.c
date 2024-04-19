@@ -282,6 +282,7 @@ static irqreturn_t sw5100_chg_state_change_irq_handler(int irq, void *data)
 
 	power_supply_changed(chg->psy);
 
+	/* Modify QBG update rate for different charge states. */
 	switch (stat & CHGR_BATTERY_CHARGER_STATUS_MASK) {
 		case SW5100_FULLON_CHARGE:
 		case SW5100_TAPER_CHARGE:
@@ -304,6 +305,20 @@ static irqreturn_t sw5100_chg_state_change_irq_handler(int irq, void *data)
 			}
 			break;
 	}
+
+	/* Monitor soc discrepancies at charge termination. */
+	if ((stat & CHGR_BATTERY_CHARGER_STATUS_MASK) == SW5100_TERMINATE_CHARGE) {
+		int sys_soc = 100;
+
+		rc = sw5100_get_prop_from_bms(chg, SW5100_QBG_REAL_CAPACITY, &sys_soc);
+		if (rc != 0) {
+			dev_err(chg->dev, "Failed to read system soc, rc=%d\n", rc);
+		} else if (sys_soc != 100) {
+			dev_err(chg->dev, "Battery full charge termination, sys_soc of %d != 100%%\n",
+				sys_soc);
+		}
+	}
+
 	return IRQ_HANDLED;
 }
 
