@@ -117,7 +117,8 @@ struct bias_config {
 #define CHGR_BATTERY_CHARGER_STATUS_MASK	GENMASK(2, 0)
 
 #define CHGR_USB_SUSPEND			0x2954
-#define USBIN_SUSPEND BIT(0)
+#define USBIN_SUSPEND				BIT(0)
+#define SUSPEND_ON_COLLAPSE_USBIN		BIT(7)
 
 #define CHGR_FLOAT_VOLTAGE_BASE			3600000
 #define CHGR_CHARGE_CURRENT_STEP		25000
@@ -1369,6 +1370,18 @@ static int bms_probe(struct platform_device *pdev)
 		}
 
 		sw5100_get_batt_id(bms, &bms->batt_id_ohms);
+
+		/*
+		 * If AICL collapses, do not "latch-off" (i.e. do not require
+		 * that a user take the device off-charger and place it back
+		 * on-charger in order to attempt charging again).
+		 */
+		rc = sw5100_masked_write(bms->pmic_regmap, CHGR_USB_SUSPEND,
+					SUSPEND_ON_COLLAPSE_USBIN, 0);
+		if (rc != 0) {
+			dev_err(bms->dev,
+				"Could not disable USBIN latch-off, rc=%d\n", rc);
+		}
 	}
 
 	rc = sw5100_parse_dt(bms);
