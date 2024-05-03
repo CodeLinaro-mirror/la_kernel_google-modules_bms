@@ -392,6 +392,7 @@ static struct irq_chip max77779_pmic_sgpio_irq_chip = {
 static int max77779_pmic_sgpio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	struct device_node *dn;
 	struct max77779_pmic_sgpio_info *info;
 	struct gpio_chip *gpio_chip;
 	int irq_in;
@@ -429,8 +430,11 @@ static int max77779_pmic_sgpio_probe(struct platform_device *pdev)
 	gpio_chip->set_config = gpiochip_generic_config;
 	gpio_chip->base = -1;
 	gpio_chip->can_sleep = true;
-	gpio_chip->of_node = dev->of_node;
 	gpio_chip->ngpio = MAX77779_SGPIO_NUM_GPIOS;
+	dn = of_find_node_by_name(dev->of_node, gpio_chip->label);
+	if (!dn)
+		dev_err(dev, "Failed to find %s DT node\n", gpio_chip->label);
+	gpio_chip->fwnode = of_node_to_fwnode(dn);
 
 	gpio_irq_chip_set_chip(&gpio_chip->irq, &max77779_pmic_sgpio_irq_chip);
 
