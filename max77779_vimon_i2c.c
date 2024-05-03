@@ -23,7 +23,7 @@ static const struct i2c_device_id max77779_vimon_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, max77779_vimon_id);
 
-static int max77779_vimon_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int max77779_vimon_i2c_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct max77779_vimon_data *data;
