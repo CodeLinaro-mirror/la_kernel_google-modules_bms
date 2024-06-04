@@ -1215,8 +1215,12 @@ static int sw5100_psy_set_property(struct power_supply *psy,
 		 * Float voltage setting = 3.6V + (DATA x 10mV)
 		 */
 		ivalue = pval->intval;
-		if (ivalue < CHGR_FLOAT_VOLTAGE_BASE)
-			val = 0;
+		if (ivalue < CHGR_FLOAT_VOLTAGE_BASE) {
+			pr_err("CONSTANT_CHARGE_VOLTAGE_MAX : %d (ivalue) < %d (base). Ignoring\n",
+				ivalue, CHGR_FLOAT_VOLTAGE_BASE);
+			rc = -EINVAL;
+			break;
+		}
 		else
 			val = (ivalue - CHGR_FLOAT_VOLTAGE_BASE) / 10000;
 
