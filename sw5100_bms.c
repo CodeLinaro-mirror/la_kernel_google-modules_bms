@@ -56,6 +56,7 @@ struct bms_dev {
 	int				chg_term_voltage_debounce;
 	/* Amount of SOC percentage points to offset to 0% UI SOC. */
 	int				soc_shutdown_offset;
+	bool				chg_buck_fsw_sel_1p35;
 	struct iio_channel		*batt_therm_chan;
 	struct iio_channel		*batt_id_chan;
 	struct iio_channel		**iio_chan_list_qg;
@@ -122,6 +123,12 @@ struct bias_config {
 
 #define QBG_MAIN_QBG_STATE_FORCE_CMD		0x4F41
 #define FORCE_HIGH_POWER_SHIFT			2
+
+#define DCDC_BUCK_FSW_SEL_REG			0x2742
+/* 1 MHz */
+#define BUCK_FSW_SEL_1P00			0
+/* 1.35 MHz */
+#define BUCK_FSW_SEL_1P35			BIT(0)
 
 #define CHGR_FLOAT_VOLTAGE_BASE			3600000
 #define CHGR_CHARGE_CURRENT_STEP		25000
@@ -1374,7 +1381,26 @@ static int sw5100_parse_dt(struct bms_dev *bms)
 	if (sw5100_psy_desc.name == NULL)
 		return -EINVAL;
 
+	bms->chg_buck_fsw_sel_1p35 =
+		of_property_read_bool(node, "google,chg-buck-fsw-sel-1p35");
+
 	return 0;
+}
+
+static void sw5100_set_chg_buck_frequency(struct bms_dev *bms)
+{
+	u8 freq = BUCK_FSW_SEL_1P00;
+	int rc;
+
+	if (bms->chg_buck_fsw_sel_1p35)
+		freq = BUCK_FSW_SEL_1P35;
+
+	rc = sw5100_write(bms->pmic_regmap, DCDC_BUCK_FSW_SEL_REG, &freq, 1);
+	if (rc < 0) {
+		dev_warn(bms->dev,
+			"Could not set charger buck switching frequency, rc=%d\n",
+			rc);
+	}
 }
 
 static int bms_probe(struct platform_device *pdev)
@@ -1435,6 +1461,8 @@ static int bms_probe(struct platform_device *pdev)
 		pr_err("Parse the device tree fail. rc = %d\n", rc);
 		goto exit;
 	}
+
+	sw5100_set_chg_buck_frequency(bms);
 
 	/* Register the power supply */
 	bms_psy_cfg.drv_data = bms;
