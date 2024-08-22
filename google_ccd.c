@@ -656,13 +656,11 @@ static int google_ccd_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int google_ccd_remove(struct platform_device *pdev)
+static void google_ccd_remove(struct platform_device *pdev)
 {
 	struct gccd_drv *gccd = platform_get_drvdata(pdev);
 
 	cancel_delayed_work(&gccd->init_work);
-
-	return 0;
 }
 
 static const struct of_device_id google_ccd_of_match[] = {
