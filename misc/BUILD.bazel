@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "kernel_module")
 
 filegroup(
     name = "headers",
@@ -16,6 +16,15 @@ filegroup(
         "//private/google-modules/soc/msm:__pkg__",
         "//private/google-modules/soc/msm/drivers/power/supply/google:__pkg__",
         "//private/google-modules/soc/msm/drivers/power/supply/qcom:__pkg__",
+    ],
+)
+
+ddk_headers(
+    name = "headers_ddk",
+    hdrs = [":headers"],
+    includes = ["."],
+    visibility = [
+        "//private/google-modules/soc/msm/drivers/power/supply/google/kamino:__pkg__",
     ],
 )
 
@@ -51,6 +60,7 @@ kernel_module(
         "//private/google-modules/soc/gs:__pkg__",
         "//private/google-modules/soc/msm:__pkg__",
         "//private/google-modules/soc/msm/drivers/power/supply/google:__pkg__",
+        "//private/google-modules/soc/msm/drivers/power/supply/google/kamino:__pkg__",
         "//private/google-modules/soc/msm/drivers/power/supply/qcom:__pkg__",
     ],
 )
