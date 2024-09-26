@@ -15,7 +15,7 @@ filegroup(
         "//private/google-modules/soc/gs:__pkg__",
         "//private/google-modules/soc/msm:__pkg__",
         "//private/google-modules/soc/msm/drivers/power/supply/google:__pkg__",
-        "//private/msm-google/drivers/power/supply/qcom:__pkg__",
+        "//private/google-modules/soc/msm/drivers/power/supply/qcom:__pkg__",
     ],
 )
 
@@ -51,6 +51,6 @@ kernel_module(
         "//private/google-modules/soc/gs:__pkg__",
         "//private/google-modules/soc/msm:__pkg__",
         "//private/google-modules/soc/msm/drivers/power/supply/google:__pkg__",
-        "//private/msm-google/drivers/power/supply/qcom:__pkg__",
+        "//private/google-modules/soc/msm/drivers/power/supply/qcom:__pkg__",
     ],
 )

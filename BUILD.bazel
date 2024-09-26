@@ -19,7 +19,7 @@ kernel_module(
         "**/*.h",
     ]) + [
         "//private/google-modules/bms/misc:headers",
-        "//private/msm-google/drivers/power/supply/qcom:qcom_battery_headers",
+        "//private/google-modules/soc/msm/drivers/power/supply/qcom:qcom_battery_headers",
     ],
     outs = [
         "google-battery.ko",
@@ -33,6 +33,6 @@ kernel_module(
     ],
     deps = [
         "//private/google-modules/bms/misc:bms-misc",
-        "//private/msm-google/drivers/power/supply/qcom:qcom_battery_modules",
+        "//private/google-modules/soc/msm/drivers/power/supply/qcom:qcom_battery_modules",
     ],
 )

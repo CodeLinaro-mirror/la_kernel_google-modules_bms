@@ -143,7 +143,7 @@ modules:
 		$(@)
 
 EXTRA_SYMBOLS += $(OUT_DIR)/../google-modules/bms/misc/Module.symvers
-EXTRA_SYMBOLS += $(OUT_DIR)/../msm-google/drivers/power/supply/qcom/Module.symvers
+EXTRA_SYMBOLS += $(OUT_DIR)/../google-modules/soc/msm/drivers/power/supply/qcom/Module.symvers
 include $(KERNEL_SRC)/../google-modules/soc/msm/Makefile.include
 
 modules modules_install clean:
