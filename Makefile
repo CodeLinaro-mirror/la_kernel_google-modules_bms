@@ -132,7 +132,7 @@ subdir-ccflags-y += \
 
 KBUILD_OPTIONS += $(foreach m,$(GBMS_MODULES),CONFIG_$(m)=m )
 
-EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/drivers/power/supply/qcom
+EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/soc/msm/drivers/power/supply/qcom
 EXTRA_CFLAGS += -DDYNAMIC_DEBUG_MODULE
 EXTRA_CFLAGS += $(foreach m,$(GBMS_MODULES),-DCONFIG_$(m)_MODULE)
 EXTRA_CFLAGS	+= -DCONFIG_DISABLE_GOOGLE_DC_PPS
