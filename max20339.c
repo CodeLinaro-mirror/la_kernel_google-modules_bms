@@ -423,6 +423,8 @@ static int max20339_probe(struct i2c_client *client)
 	ovp->gpio.base = -1;
 	ovp->gpio.ngpio = MAX20339_NUM_GPIOS;
 	ovp->gpio.can_sleep = true;
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(client->dev.of_node);
 	dp = of_find_node_by_name(client->dev.of_node, ovp->gpio.label);
 	if (!dp)
 		dev_err(&client->dev, "Failed to find %s DT node\n",
