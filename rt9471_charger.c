@@ -2097,6 +2097,8 @@ static int rt9471_probe(struct i2c_client *client)
 
 		rt9471_gpio_init(chip);
 		chip->gpio.parent = chip->dev;
+		/* balance of_node_put() in of_find_node_by_name() */
+		of_node_get(client->dev.of_node);
 		dn = of_find_node_by_name(client->dev.of_node,
 					  chip->gpio.label);
 		if (!dn)
