@@ -3715,6 +3715,8 @@ int max77779_charger_init(struct max77779_chgr_data *data)
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	max77779_gpio_init(data);
 	data->gpio.parent = dev;
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(dev->of_node);
 	dn = of_find_node_by_name(dev->of_node, data->gpio.label);
 	if (!dn)
 		dev_warn(dev, "Failed to find %s DT node\n", data->gpio.label);
