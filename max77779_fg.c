@@ -3939,6 +3939,8 @@ void max77779_fg_remove(struct max77779_fg_chip *chip)
 		power_supply_unregister(chip->psy);
 
 	maxfg_free_capture_buf(&chip->cb_lh);
+
+	of_node_put(chip->batt_node);
 }
 EXPORT_SYMBOL_GPL(max77779_fg_remove);
 
