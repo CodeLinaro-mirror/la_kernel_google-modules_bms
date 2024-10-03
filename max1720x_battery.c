@@ -2798,6 +2798,8 @@ static struct device_node *max1720x_find_batt_node(struct max1720x_chip *chip)
 	u32 batt_id_range = 20, batt_id_kohm;
 	int ret;
 
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(dev->of_node);
 	config_node = of_find_node_by_name(dev->of_node, "maxim,config");
 	if (!config_node) {
 		dev_warn(dev, "Failed to find maxim,config setting\n");
