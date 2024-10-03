@@ -432,6 +432,8 @@ static int max77779_pmic_sgpio_probe(struct platform_device *pdev)
 	gpio_chip->base = -1;
 	gpio_chip->can_sleep = true;
 	gpio_chip->ngpio = MAX77779_SGPIO_NUM_GPIOS;
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(dev->of_node);
 	dn = of_find_node_by_name(dev->of_node, gpio_chip->label);
 	if (!dn)
 		dev_err(dev, "Failed to find %s DT node\n", gpio_chip->label);
