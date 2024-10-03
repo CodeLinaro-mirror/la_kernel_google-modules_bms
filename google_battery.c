@@ -19,6 +19,7 @@
 #define SUPPORT_PM_SLEEP 1
 #endif
 
+#include <linux/cleanup.h>
 #include <linux/kernel.h>
 #include <linux/printk.h>
 #include <linux/module.h>
@@ -6600,7 +6601,7 @@ static ssize_t chg_profile_switch_store(struct device *dev,
 {
 	struct power_supply *psy = container_of(dev, struct power_supply, dev);
 	struct batt_drv *batt_drv =(struct batt_drv *) power_supply_get_drvdata(psy);
-	struct device_node *node;
+	struct device_node *node __free(device_node) = NULL;
 	int val, ret;
 
 	if (!batt_drv->chg_profile.enable_switch_chg_profile)
@@ -6613,6 +6614,13 @@ static ssize_t chg_profile_switch_store(struct device *dev,
 	if (batt_drv->chg_profile.debug_chg_profile == !!val)
 		return count;
 
+	/*
+	 * This serves two objectives:
+	 * - balance of_node_put() in of_find_node_by_name()
+	 * - ensure 'node' (batt_drv->device->of_node) stays valid in the
+	 *   alternative path
+	 */
+	of_node_get(batt_drv->device->of_node);
 	if (val)
 		node = of_find_node_by_name(batt_drv->device->of_node,
 					    "google_debug_chg_profile");
