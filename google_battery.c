@@ -1539,7 +1539,7 @@ static bool batt_rl_enter(struct batt_ssoc_state *ssoc_state,
 }
 
 static int ssoc_rl_read_dt(struct batt_ssoc_rl_state *rls,
-			   struct device_node *node)
+			   const struct device_node *node)
 {
 	u32 tmp, delta_soc[RL_DELTA_SOC_MAX];
 	int ret, i;
@@ -5365,7 +5365,7 @@ static int batt_bpst_reset(struct batt_bpst *bpst_state)
 static int batt_init_bpst_profile(struct batt_drv *batt_drv)
 {
 	struct batt_bpst *bpst_state = &batt_drv->bpst_state;
-	struct device_node *node = batt_drv->device->of_node;
+	const struct device_node *node = batt_drv->device->of_node;
 	int ret;
 
 	/* set cell_fault initial status */
@@ -9980,7 +9980,7 @@ done:
 
 static int batt_init_shutdown_flag(struct batt_drv *batt_drv)
 {
-	struct device_node *node = batt_drv->device->of_node;
+	const struct device_node *node = batt_drv->device->of_node;
 	u8 data;
 	int ret;
 
@@ -11678,7 +11678,8 @@ static struct thermal_zone_device_ops google_battery_tz_ops = {
 	.get_temp = google_battery_tz_get_cycle_count,
 };
 
-static int batt_ravg_init(struct batt_res *res_state, struct device_node *node)
+static int batt_ravg_init(struct batt_res *res_state,
+			  const struct device_node *node)
 {
 	int ret;
 

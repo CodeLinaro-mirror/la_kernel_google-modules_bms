@@ -331,7 +331,7 @@ int max77779_fg_register_write(const struct maxfg_regmap *regmap, unsigned int r
 int max77779_fg_nregister_write(const struct maxfg_regmap *map,
 				const struct maxfg_regmap *debug_map,
 				unsigned int reg, u16 value, bool verify);
-void *max77779_init_data(struct device *dev, struct device_node *batt_node,
+void *max77779_init_data(struct device *dev, const struct device_node *batt_node,
 			 struct maxfg_regmap *regmap, struct maxfg_regmap *debug_regmap);
 void max77779_free_data(struct max77779_model_data *model_data);
 

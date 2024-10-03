@@ -1448,7 +1448,7 @@ int max_m5_recal_cycle(const struct max_m5_data *m5_data)
 /* Initial values??? */
 #define CGAIN_RESET_VAL 0x0400
 int m5_init_custom_parameters(struct device *dev, struct max_m5_data *m5_data,
-			      struct device_node *node)
+			      const struct device_node *node)
 {
 	struct max_m5_custom_parameters *cp = &m5_data->parameters;
 	const char *propname = "maxim,fg-params";
@@ -1484,7 +1484,7 @@ void max_m5_free_data(struct max_m5_data *m5_data)
 	devm_kfree(m5_data->dev, m5_data);
 }
 
-void *max_m5_init_data(struct device *dev, struct device_node *node,
+void *max_m5_init_data(struct device *dev, const struct device_node *node,
 		       struct maxfg_regmap *regmap)
 {
 	const char *propname = "maxim,fg-model";

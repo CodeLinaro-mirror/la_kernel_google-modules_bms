@@ -2837,7 +2837,7 @@ static struct device_node *max1720x_find_batt_node(struct max1720x_chip *chip)
 }
 
 static int max17x0x_apply_regval_shadow(struct max1720x_chip *chip,
-					struct device_node *node,
+					const struct device_node *node,
 					struct max17x0x_cache_data *nRAM,
 					int nb)
 {
@@ -3045,7 +3045,7 @@ error_out:
 }
 
 static int max17x0x_apply_regval_register(struct max1720x_chip *chip,
-					struct device_node *node)
+					  const struct device_node *node)
 {
 	int cnt, ret = 0, idx, err;
 	u16 *regs, data;

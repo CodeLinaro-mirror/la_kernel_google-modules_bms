@@ -1197,7 +1197,7 @@ static void gbee_destroy(struct gbee_data *beed)
 
 #define entry_size(x) (ilog2(x) + (((x) & ((x) - 1)) != 0))
 
-static void gbms_storage_parse_provider_refs(struct device_node *node)
+static void gbms_storage_parse_provider_refs(const struct device_node *node)
 {
 	const char *s;
 	int i, ret, count;

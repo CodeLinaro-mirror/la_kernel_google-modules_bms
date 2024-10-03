@@ -453,7 +453,7 @@ int gbms_init_chg_profile_internal(struct gbms_chg_profile *profile,
 	gbms_init_chg_profile_internal(p, n, KBUILD_MODNAME)
 
 void gbms_init_chg_table(struct gbms_chg_profile *profile,
-			 struct device_node *node, u32 capacity);
+			 const struct device_node *node, u32 capacity);
 
 void gbms_free_chg_profile(struct gbms_chg_profile *profile);
 
@@ -609,7 +609,7 @@ int ttf_soc_cstr_combine(char *buff, int size, const struct ttf_soc_stats *soc_r
 			 const struct ttf_soc_stats *soc_stats);
 
 int gbms_read_aacr_limits(struct gbms_chg_profile *profile,
-			  struct device_node *node);
+			  const struct device_node *node);
 
 int gbms_read_aafv_limits(struct gbms_chg_profile *profile,
 			  struct device_node *node);

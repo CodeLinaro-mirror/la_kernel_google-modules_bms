@@ -936,7 +936,7 @@ static struct gbms_desc gdbatt_psy_desc = {
 /* ------------------------------------------------------------------------ */
 
 static int gdbatt_init_pack_chg_profile(struct gbms_chg_profile *pack_profile,
-					struct device_node *node,
+					const struct device_node *node,
 					const struct gbms_chg_profile *profile,
 					u32 capacity_ma)
 {

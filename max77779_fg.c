@@ -66,7 +66,8 @@ enum max77779_fg_command_bits {
 static irqreturn_t max77779_fg_irq_thread_fn(int irq, void *obj);
 static int max77779_fg_set_next_update(struct max77779_fg_chip *chip);
 static int max77779_fg_update_cycle_count(struct max77779_fg_chip *chip);
-static int max77779_fg_apply_register(struct max77779_fg_chip *chip, struct device_node *node);
+static int max77779_fg_apply_register(struct max77779_fg_chip *chip,
+				      const struct device_node *node);
 static u16 max77779_fg_save_battery_cycle(struct max77779_fg_chip *chip, u16 reg_cycle);
 
 /* Do not move reg_write_nolock to public header */
@@ -3673,7 +3674,8 @@ static const struct attribute_group max77779_fg_attr_grp = {
 	.attrs = max77779_fg_attrs,
 };
 
-static int max77779_fg_apply_register(struct max77779_fg_chip *chip, struct device_node *node)
+static int max77779_fg_apply_register(struct max77779_fg_chip *chip,
+				      const struct device_node *node)
 {
 	struct maxfg_regmap *regmap;
 	const char *propname[] = {"max77779,fg_regval", "max77779,fg_n_regval"};

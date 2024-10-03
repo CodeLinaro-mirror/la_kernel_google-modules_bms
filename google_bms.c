@@ -146,7 +146,7 @@ EXPORT_SYMBOL_GPL(gbms_batt_id_node);
  * call this twice.
  */
 void gbms_init_chg_table(struct gbms_chg_profile *profile,
-			 struct device_node *node, u32 capacity_ma)
+			 const struct device_node *node, u32 capacity_ma)
 {
 	u32 ccm;
 	int vi, ti, ret;
@@ -264,7 +264,7 @@ static int gbms_read_cccm_limits(struct gbms_chg_profile *profile,
 }
 
 int gbms_read_aacr_limits(struct gbms_chg_profile *profile,
-			  struct device_node *node)
+			  const struct device_node *node)
 {
 	int ret = 0, cycle_nb_limits = 0, fade10_nb_limits = 0;
 
