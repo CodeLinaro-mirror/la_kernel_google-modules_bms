@@ -3359,6 +3359,8 @@ static int max77759_charger_probe(struct i2c_client *client)
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	max77759_gpio_init(data);
 	data->gpio.parent = &client->dev;
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(client->dev.of_node);
 	dn = of_find_node_by_name(client->dev.of_node, data->gpio.label);
 	if (!dn)
 		dev_err(&client->dev, "Failed to find %s DT node\n", data->gpio.label);
