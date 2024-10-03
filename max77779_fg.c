@@ -2176,6 +2176,8 @@ static struct device_node *max77779_fg_find_batt_node(struct max77779_fg_chip *c
 	u32 batt_id_kohm;
 	int ret;
 
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(dev->of_node);
 	config_node = of_find_node_by_name(dev->of_node, "max77779,config");
 	if (!config_node) {
 		dev_warn(dev, "Failed to find max77779,config setting\n");
