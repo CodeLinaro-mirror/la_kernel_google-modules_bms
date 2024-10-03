@@ -1331,6 +1331,8 @@ static int max77729_pmic_probe(struct i2c_client *client)
 		data->gpio.ngpio = MAX77759_NUM_GPIOS;
 		data->gpio.can_sleep = true;
 		data->gpio.base	= -1;
+		/* balance of_node_put() in of_find_node_by_name() */
+		of_node_get(dev->of_node);
 		dn = of_find_node_by_name(dev->of_node, data->gpio.label);
 		if (!dn)
 			dev_err(dev, "Failed to find %s DT node\n", data->gpio.label);
