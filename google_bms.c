@@ -23,6 +23,7 @@
 #define gbms_err(p, fmt, ...)	\
 	pr_err("%s: " fmt, gbms_owner(p), ##__VA_ARGS__)
 
+#include <linux/cleanup.h>
 #include <linux/kernel.h>
 #include <linux/printk.h>
 #include <linux/module.h>
@@ -123,7 +124,7 @@ struct device_node *gbms_batt_id_node(struct device_node *config_node)
 
 	if (ret < 0) {
 		pr_warn("Failed to get batt_id (%d)\n", ret);
-		return config_node;
+		return of_node_get(config_node);
 	}
 
 	for_each_child_of_node(config_node, child_node) {
@@ -136,7 +137,7 @@ struct device_node *gbms_batt_id_node(struct device_node *config_node)
 			return child_node;
 	}
 
-	return config_node;
+	return of_node_get(config_node);
 }
 EXPORT_SYMBOL_GPL(gbms_batt_id_node);
 
@@ -184,6 +185,7 @@ static int gbms_read_cccm_limits(struct gbms_chg_profile *profile,
 				 struct device_node *node)
 {
 	int ret;
+	struct device_node *batt_id_node __free(device_node) = NULL;
 
 	profile->temp_nb_limits =
 	    of_property_count_elems_of_size(node, "google,chg-temp-limits",
@@ -207,8 +209,10 @@ static int gbms_read_cccm_limits(struct gbms_chg_profile *profile,
 		return ret;
 	}
 
+	batt_id_node = gbms_batt_id_node(node);
+
 	profile->volt_nb_limits =
-	    of_property_count_elems_of_size(gbms_batt_id_node(node), "google,chg-cv-limits",
+	    of_property_count_elems_of_size(batt_id_node, "google,chg-cv-limits",
 					    sizeof(u32));
 	/* google,chg-cv-limits does not exist in the child_node */
 	if (profile->volt_nb_limits <= 0)
@@ -225,7 +229,7 @@ static int gbms_read_cccm_limits(struct gbms_chg_profile *profile,
 		       GBMS_CHG_VOLT_NB_LIMITS_MAX);
 		return -EINVAL;
 	}
-	ret = of_property_read_u32_array(gbms_batt_id_node(node), "google,chg-cv-limits",
+	ret = of_property_read_u32_array(batt_id_node, "google,chg-cv-limits",
 					 (u32 *)profile->volt_limits,
 					 profile->volt_nb_limits);
 	/* google,chg-cv-limits does not exist in the child_node */

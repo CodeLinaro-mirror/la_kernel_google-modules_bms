@@ -5690,6 +5690,7 @@ static int batt_init_chg_profile(struct batt_drv *batt_drv, struct device_node *
 {
 	struct gbms_chg_profile *profile = &batt_drv->chg_profile;
 	int ret = 0;
+	struct device_node *batt_id_node __free(device_node) = NULL;
 
 	/* handle retry */
 	if (!profile->cccm_limits) {
@@ -5698,8 +5699,10 @@ static int batt_init_chg_profile(struct batt_drv *batt_drv, struct device_node *
 			return -EINVAL;
 	}
 
+	batt_id_node = gbms_batt_id_node(node);
+
 	/* this is in mAh */
-	ret = of_property_read_u32(gbms_batt_id_node(node),
+	ret = of_property_read_u32(batt_id_node,
 				   "google,chg-battery-capacity",
 				    &batt_drv->battery_capacity);
 	/* google,chg-battery-capacity does not exist in the child_node */
@@ -5742,7 +5745,7 @@ static int batt_init_chg_profile(struct batt_drv *batt_drv, struct device_node *
 	}
 
 	/* TODO: dump the AACR table if supported */
-	ret = gbms_read_aacr_limits(profile, gbms_batt_id_node(node));
+	ret = gbms_read_aacr_limits(profile, batt_id_node);
 	if (ret == 0)
 		pr_info("AACR: supported\n");
 
@@ -11083,6 +11086,7 @@ static int batt_bhi_init(struct batt_drv *batt_drv)
 	struct bhi_data *bhi_data = &health_data->bhi_data;
 	u16 capacity_boundary[BHI_TREND_POINTS_SIZE];
 	int ret, i;
+	struct device_node *batt_id_node __free(device_node) = NULL;
 
 	/* set upper_bound value to BHI_CAPACITY_MAX(0xFFFF) */
 	memset(bhi_data->upper_bound.limit, 0xFF, sizeof(bhi_data->upper_bound.limit));
@@ -11145,7 +11149,9 @@ static int batt_bhi_init(struct batt_drv *batt_drv)
 	/* need battery id to get right trend points */
 	batt_drv->batt_id = GPSY_GET_PROP(batt_drv->fg_psy, GBMS_PROP_BATT_ID);
 
-	ret = of_property_read_u16_array(gbms_batt_id_node(batt_drv->device->of_node),
+	batt_id_node = gbms_batt_id_node(batt_drv->device->of_node);
+
+	ret = of_property_read_u16_array(batt_id_node,
 					 "google,bhi-l-bound", &capacity_boundary[0],
 					 BHI_TREND_POINTS_SIZE);
 	if (ret == 0 && bhi_bound_validity_check(capacity_boundary, 0,
@@ -11163,7 +11169,7 @@ static int batt_bhi_init(struct batt_drv *batt_drv)
 		 bhi_data->lower_bound.limit[6], bhi_data->lower_bound.limit[7],
 		 bhi_data->lower_bound.limit[8], bhi_data->lower_bound.limit[9]);
 
-	ret = of_property_read_u16_array(gbms_batt_id_node(batt_drv->device->of_node),
+	ret = of_property_read_u16_array(batt_id_node,
 					 "google,bhi-u-bound", &capacity_boundary[0],
 					 BHI_TREND_POINTS_SIZE);
 	if (ret == 0 && bhi_bound_validity_check(capacity_boundary, batt_drv->battery_capacity,
@@ -11181,7 +11187,7 @@ static int batt_bhi_init(struct batt_drv *batt_drv)
 		 bhi_data->upper_bound.limit[6], bhi_data->upper_bound.limit[7],
 		 bhi_data->upper_bound.limit[8], bhi_data->upper_bound.limit[9]);
 
-	ret = of_property_read_u16_array(gbms_batt_id_node(batt_drv->device->of_node),
+	ret = of_property_read_u16_array(batt_id_node,
 					 "google,bhi-l-trigger", &capacity_boundary[0],
 					 BHI_TREND_POINTS_SIZE);
 	if (ret == 0 && bhi_bound_validity_check(capacity_boundary, BHI_CAPACITY_MIN,
@@ -11197,7 +11203,7 @@ static int batt_bhi_init(struct batt_drv *batt_drv)
 			 bhi_data->lower_bound.trigger[8], bhi_data->lower_bound.trigger[9]);
 	}
 
-	ret = of_property_read_u16_array(gbms_batt_id_node(batt_drv->device->of_node),
+	ret = of_property_read_u16_array(batt_id_node,
 					 "google,bhi-u-trigger", &capacity_boundary[0],
 					 BHI_TREND_POINTS_SIZE);
 	if (ret == 0 && bhi_bound_validity_check(capacity_boundary, BHI_CAPACITY_MIN,
@@ -11306,6 +11312,7 @@ static void google_battery_init_work(struct work_struct *work)
 	struct batt_drv *batt_drv = container_of(work, struct batt_drv,
 						 init_work.work);
 	struct device_node *node = batt_drv->device->of_node;
+	struct device_node *batt_id_node __free(device_node) = NULL;
 	struct power_supply *fg_psy = batt_drv->fg_psy;
 	const char *batt_vs_tz_name = NULL;
 	int init_delay_ms, ret = 0;
@@ -11618,12 +11625,14 @@ static void google_battery_init_work(struct work_struct *work)
 	if (batt_drv->dc_irdrop)
 		pr_info("dc irdrop is enabled\n");
 
-	batt_drv->pullback_current = of_property_read_bool(gbms_batt_id_node(node),
+	batt_id_node = gbms_batt_id_node(node);
+
+	batt_drv->pullback_current = of_property_read_bool(batt_id_node,
 							   "google,pullback-current");
 	if (batt_drv->pullback_current)
 		pr_info("pullback current is enabled\n");
 
-	batt_drv->allow_higher_fv = of_property_read_bool(gbms_batt_id_node(node),
+	batt_drv->allow_higher_fv = of_property_read_bool(batt_id_node,
 							   "google,allow-higher-fv");
 	if (batt_drv->allow_higher_fv)
 		pr_info("allow higher fv is enabled\n");
