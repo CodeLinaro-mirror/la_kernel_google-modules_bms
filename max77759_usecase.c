@@ -246,15 +246,17 @@ static int gs101_ext_mode(struct max77759_usecase_data *uc_data, int mode)
 		gpiod_set_value_cansleep(uc_data->bst_on, 0);
 		break;
 	case EXT_MODE_OTG_5_0V:
-		if (!IS_ERR(uc_data->bst_sel))
+		if (!IS_ERR(uc_data->bst_sel)) {
 			gpiod_set_value_cansleep(uc_data->bst_sel, 0);
-		msleep(100);
+			usleep_range(100 * USEC_PER_MSEC, 100 * USEC_PER_MSEC + 100);
+		}
 		gpiod_set_value_cansleep(uc_data->bst_on, 1);
 		break;
 	case EXT_MODE_OTG_7_5V: /* TODO: verify this */
-		if (!IS_ERR(uc_data->bst_sel))
+		if (!IS_ERR(uc_data->bst_sel)) {
 			gpiod_set_value_cansleep(uc_data->bst_sel, 1);
-		msleep(100);
+			usleep_range(100 * USEC_PER_MSEC, 100 * USEC_PER_MSEC + 100);
+		}
 		gpiod_set_value_cansleep(uc_data->bst_on, 1);
 		break;
 	default:
@@ -264,9 +266,14 @@ static int gs101_ext_mode(struct max77759_usecase_data *uc_data, int mode)
 	return 0;
 }
 
-int gs101_wlc_en(struct max77759_usecase_data *uc_data, bool wlc_on)
+int gs101_wlc_en(struct max77759_usecase_data *uc_data, enum wlc_state_t state)
 {
-	pr_debug("%s: cpout_en=%d wlc_en=%d wlc_vbus_en=%d wlc_on=%d\n", __func__,
+	int wlc_on = 0;
+
+	if (state == WLC_ENABLED)
+		wlc_on = 1;
+
+	pr_debug("%s: cpout_en=%d wlc_en=%d wlc_vbus_en=%d wlc_on=%d wlc_state=%d\n", __func__,
 		 (IS_ERR_OR_NULL(uc_data->cpout_en)
 		  ? (int)PTR_ERR(uc_data->cpout_en)
 		  : desc_to_gpio(uc_data->cpout_en)),
@@ -275,9 +282,11 @@ int gs101_wlc_en(struct max77759_usecase_data *uc_data, bool wlc_on)
 		  : desc_to_gpio(uc_data->wlc_en)),
 		 (IS_ERR_OR_NULL(uc_data->wlc_vbus_en)
 		  ? (int)PTR_ERR(uc_data->wlc_vbus_en)
-		  : desc_to_gpio(uc_data->wlc_vbus_en)), wlc_on);
+		  : desc_to_gpio(uc_data->wlc_vbus_en)), wlc_on, state);
 
 	if (!IS_ERR(uc_data->cpout_en)) {
+		if (state == WLC_SPOOFED && !IS_ERR(uc_data->wlc_spoof_gpio))
+			gpiod_set_value_cansleep(uc_data->wlc_spoof_gpio, 1);
 		gpiod_set_value_cansleep(uc_data->cpout_en, wlc_on);
 	} else if (!wlc_on) {
 		/*
@@ -311,15 +320,17 @@ static int gs101_wlc_tx_enable(struct max77759_usecase_data *uc_data,
 			ret = gs101_ls2_mode(uc_data, OVP_LS2_MODE_ON);
 		if (ret == 0)
 			ret = gs101_ext_mode(uc_data, EXT_MODE_OTG_7_5V);
-		if (ret == 0 && uc_data->wlctx_bst_en_first)
+		if (ret == 0 && uc_data->wlctx_bst_en_first) {
+			usleep_range(20 * USEC_PER_MSEC, 20 * USEC_PER_MSEC + 100);
 			ret = gs101_ls2_mode(uc_data, OVP_LS2_MODE_ON);
+		}
 		if (ret < 0)
 			return ret;
 
-		msleep(100);
+		usleep_range(100 * USEC_PER_MSEC, 100 * USEC_PER_MSEC + 100);
 
 		/* p9412 will not be in RX when powered from EXT */
-		ret = gs101_wlc_en(uc_data, true);
+		ret = gs101_wlc_en(uc_data, WLC_ENABLED);
 		if (ret < 0)
 			return ret;
 
@@ -327,7 +338,7 @@ static int gs101_wlc_tx_enable(struct max77759_usecase_data *uc_data,
 			gpiod_set_value_cansleep(uc_data->cpout21_en, 0);
 	} else {
 		/* p9412 is already off from insel */
-		ret = gs101_wlc_en(uc_data, false);
+		ret = gs101_wlc_en(uc_data, WLC_DISABLED);
 		if (ret < 0)
 			return ret;
 
@@ -596,7 +607,7 @@ int gs101_to_standby(struct max77759_usecase_data *uc_data, int use_case)
 		}
 
 		/* re-enable wlc IC if disabled */
-		ret = gs101_wlc_en(uc_data, true);
+		ret = gs101_wlc_en(uc_data, WLC_ENABLED);
 		if (ret < 0)
 			pr_err("%s: cannot enable WLC (%d)\n", __func__, ret);
 	}
@@ -1362,6 +1373,7 @@ static void gs101_setup_default_usecase(struct max77759_usecase_data *uc_data)
 	uc_data->wlc_en = ERR_PTR(-EPROBE_DEFER);
 	uc_data->wlc_vbus_en = ERR_PTR(-EPROBE_DEFER);
 	uc_data->cpout_en = ERR_PTR(-EPROBE_DEFER);
+	uc_data->wlc_spoof_gpio = ERR_PTR(-EPROBE_DEFER);
 	uc_data->cpout_ctl = ERR_PTR(-EPROBE_DEFER);
 	uc_data->cpout21_en = ERR_PTR(-EPROBE_DEFER);
 
@@ -1441,6 +1453,9 @@ bool gs101_setup_usecases(struct max77759_usecase_data *uc_data,
 	/*  wlc_rx -> wlc_rx+otg disable cpout */
 	if (PTR_ERR(uc_data->cpout_en) == -EPROBE_DEFER)
 		uc_data->cpout_en = devm_gpiod_get_optional(dev, "max77759,cpout-en", GPIOD_ASIS);
+	/*  wlc_rx thermal throttle -> spoof online */
+	if (PTR_ERR(uc_data->wlc_spoof_gpio) == -EPROBE_DEFER)
+	    uc_data->wlc_spoof_gpio = devm_gpiod_get_optional(dev, "max77759,wlc-spoof", GPIOD_ASIS);
 	/* to 5.2V in p9412 */
 	if (PTR_ERR(uc_data->cpout_ctl) == -EPROBE_DEFER)
 		uc_data->cpout_ctl = devm_gpiod_get_optional(dev, "max77759,cpout-ctl", GPIOD_ASIS);

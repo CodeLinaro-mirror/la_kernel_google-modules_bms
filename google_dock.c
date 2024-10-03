@@ -26,7 +26,6 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
-#include <misc/gvotable.h>
 #include "gbms_power_supply.h"
 #include "google_bms.h"
 #include "google_psy.h"
@@ -672,6 +671,10 @@ static int google_dock_remove(struct platform_device *pdev)
 {
 	struct dock_drv *dock = platform_get_drvdata(pdev);
 
+	if (!dock)
+		return 0;
+
+	power_supply_unreg_notifier(&dock->nb);
 	cancel_delayed_work(&dock->init_work);
 	cancel_delayed_work(&dock->notifier_work);
 	cancel_delayed_work(&dock->icl_ramp_work);
@@ -680,6 +683,16 @@ static int google_dock_remove(struct platform_device *pdev)
 	wakeup_source_unregister(dock->detect_ws);
 
 	return 0;
+}
+
+static void google_dock_shutdown(struct platform_device *pdev)
+{
+	struct dock_drv *dock = platform_get_drvdata(pdev);
+
+	if (!dock)
+		return;
+
+	power_supply_unreg_notifier(&dock->nb);
 }
 
 static const struct of_device_id google_dock_of_match[] = {
@@ -697,6 +710,7 @@ static struct platform_driver google_dock_driver = {
 		   },
 	.probe = google_dock_probe,
 	.remove = google_dock_remove,
+	.shutdown = google_dock_shutdown,
 };
 
 module_platform_driver(google_dock_driver);

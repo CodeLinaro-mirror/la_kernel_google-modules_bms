@@ -4,11 +4,12 @@
  *
  */
 
-#include <soc/google/bcl.h>
-#include "gs101_usecase.h"
-
 #ifndef MAX77759_CHARGER_H_
 #define MAX77759_CHARGER_H_
+
+#include <linux/gpio/driver.h>
+#include "max77759_usecase.h"
+#include "max777x9_bcl.h"
 
 struct max77759_chgr_data {
 	struct device *dev;
@@ -27,13 +28,30 @@ struct max77759_chgr_data {
 	struct gvotable_election *dc_icl_votable;
 	struct gvotable_election *dc_suspend_votable;
 
+	/* wcin inlim tracking */
+	struct delayed_work wcin_inlim_work;
+	uint32_t wcin_inlim_period;
+	uint32_t wcin_inlim_flag;
+	uint32_t wcin_inlim_headroom;
+	uint32_t wcin_inlim_step;
+	uint32_t wcin_soft_icl;
+	uint32_t wcin_inlim_en;
+	uint32_t dc_icl;
+	struct mutex wcin_inlim_lock;
+
+#if IS_ENABLED(CONFIG_GPIOLIB)
+	struct gpio_chip gpio;
+#endif
+
 	bool charge_done;
 	bool chgin_input_suspend;
 	bool wcin_input_suspend;
+	bool wlc_spoof;
 	bool thm2_sts;
 
 	int irq_int;
-	bool irq_disabled;
+
+	uint32_t cc_max;
 
 	struct i2c_client *fg_i2c_client;
 	struct i2c_client *pmic_i2c_client;
@@ -46,6 +64,7 @@ struct max77759_chgr_data {
 	atomic_t early_topoff_cnt;
 
 	struct mutex io_lock;
+	struct mutex reg_dump_lock;
 	bool resume_complete;
 	bool init_complete;
 	struct wakeup_source *usecase_wake_lock;
@@ -67,13 +86,8 @@ struct max77759_chgr_data {
 
 	struct gvotable_election *aicl_active_el;
 
-	/* thermal BCL */
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
-	struct bcl_device *bcl_dev;
-	struct delayed_work init_bcl;
-#endif
-
 	int chg_term_voltage;
 	int chg_term_volt_debounce;
 };
+
 #endif

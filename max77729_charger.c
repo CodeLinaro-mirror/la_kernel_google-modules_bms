@@ -41,6 +41,9 @@ struct max77729_chgr_data {
 	struct gvotable_election *dc_suspend_votable;
 	struct gvotable_election *dc_icl_votable;
 
+	/* input_uv is the input voltage limit */
+	int input_uv;
+
 	bool input_suspend;
 	bool online;
 
@@ -801,42 +804,45 @@ static int max77729_psy_get_property(struct power_supply *psy,
 	int ret;
 
 	switch (psp) {
-		case POWER_SUPPLY_PROP_ONLINE:
-			ret = max77729_is_online(data, &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_PRESENT:
-			ret = max77729_get_present(data, &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_CURRENT_NOW:
-			ret = max77729_get_current_now_ua(data, &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_CURRENT_MAX:
-			ret = max77729_get_ilim_max_ua(data, &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-			ret = max77729_get_charge_current_max_ua(data,
-								 &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
-			ret = max77729_get_charge_voltage_max_uv(data,
-								 &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_STATUS:
-			ret = max77729_get_status(data, &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_CHARGE_TYPE:
-			ret = max77729_get_charge_type(data, &pval->intval);
-			break;
-		case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-			ret = max77729_get_charge_voltage_max_uv(data,
-								 &pval->intval);
-			break;
+	case POWER_SUPPLY_PROP_ONLINE:
+		ret = max77729_is_online(data, &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_PRESENT:
+		ret = max77729_get_present(data, &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		ret = max77729_get_current_now_ua(data, &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		ret = max77729_get_ilim_max_ua(data, &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		ret = max77729_get_charge_current_max_ua(data,
+							 &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		pval->intval = data->input_uv;
+		ret = 0;
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+		ret = max77729_get_charge_voltage_max_uv(data,
+							 &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_STATUS:
+		ret = max77729_get_status(data, &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_TYPE:
+		ret = max77729_get_charge_type(data, &pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		ret = max77729_get_charge_voltage_max_uv(data,
+							 &pval->intval);
+		break;
 
-		default:
-			dev_err(data->dev, "property (%d) unsupported.\n", psp);
-			ret = -EINVAL;
-			break;
+	default:
+		dev_err(data->dev, "property (%d) unsupported.\n", psp);
+		ret = -EINVAL;
+		break;
 	}
 
 	return ret;
@@ -851,28 +857,30 @@ static int max77729_psy_set_property(struct power_supply *psy,
 	int ret = 0;
 
 	switch (psp) {
-		case POWER_SUPPLY_PROP_ONLINE:
-			data->online = pval->intval;
-			break;
-		case POWER_SUPPLY_PROP_CURRENT_MAX:
-			ret = max77729_set_ilim_max_ua(data, pval->intval);
-			pr_info("ilim=%d (%d)\n", pval->intval, ret);
-			break;
-		case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-			ret = max77729_set_charge_current_max_ua(data,
-								 pval->intval);
-			pr_info("charge_current=%d (%d)\n", pval->intval, ret);
-			break;
-		case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
-			ret = max77729_set_charge_voltage_max_uv(data,
-								 pval->intval);
-			pr_info("charge_voltage=%d (%d)\n", pval->intval, ret);
-			break;
-		default:
-			dev_err(data->dev, "unsupported property: %d\n", psp);
-			ret = -EINVAL;
-			break;
+	case POWER_SUPPLY_PROP_ONLINE:
+		data->online = pval->intval;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		ret = max77729_set_ilim_max_ua(data, pval->intval);
+		pr_info("ilim=%d (%d)\n", pval->intval, ret);
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		ret = max77729_set_charge_current_max_ua(data,
+							 pval->intval);
+		pr_info("charge_current=%d (%d)\n", pval->intval, ret);
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		data->input_uv = pval->intval;
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+		ret = max77729_set_charge_voltage_max_uv(data,
+							 pval->intval);
+		pr_info("charge_voltage=%d (%d)\n", pval->intval, ret);
+		break;
+	default:
+		dev_err(data->dev, "unsupported property: %d\n", psp);
+		ret = -EINVAL;
+		break;
 	};
 
 	return ret;
@@ -884,15 +892,15 @@ static int max77729_psy_property_is_writable(struct power_supply *psy,
 	int writeable = 0;
 
 	switch (psp) {
-		case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-		case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
-		case POWER_SUPPLY_PROP_CURRENT_MAX:	/* ILIM */
-		case POWER_SUPPLY_PROP_VOLTAGE_MAX:	/* same as CHARGE_* */
-		case POWER_SUPPLY_PROP_ONLINE:
-			writeable = 1;
-			break;
-		default:
-			break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
+	case POWER_SUPPLY_PROP_CURRENT_MAX:	/* ILIM */
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:	/* input voltage limit */
+	case POWER_SUPPLY_PROP_ONLINE:
+		writeable = 1;
+		break;
+	default:
+		break;
 	}
 
 	return writeable;

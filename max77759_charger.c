@@ -28,7 +28,6 @@
 #include <linux/thermal.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <misc/gvotable.h>
 #include <linux/platform_device.h>
 #include "gbms_power_supply.h"
 #include "google_bms.h"
@@ -58,6 +57,64 @@
 
 #define CHGR_CHG_CNFG_12_VREG_4P6V			0x1
 #define CHGR_CHG_CNFG_12_VREG_4P7V			0x2
+
+#define MAX77759_CHG_NUM_REGS (MAX77759_CHG_CNFG_19 - MAX77759_CHG_INT + 1)
+
+#define WCIN_INLIM_T					(5000)
+#define WCIN_INLIM_HEADROOM_MA				(200000)
+#define WCIN_INLIM_STEP_MA				(50000)
+#define MAX77759_GPIO_WCIN_INLIM_EN			0
+#define MAX77759_NUM_GPIOS				1
+
+#define WCIN_INLIM_VOTER				"WCIN_INLIM"
+
+/*
+ * int[0]
+ *  CHG_INT_AICL_I	(0x1 << 7)
+ *  CHG_INT_CHGIN_I	(0x1 << 6)
+ *  CHG_INT_WCIN_I	(0x1 << 5)
+ *  CHG_INT_CHG_I	(0x1 << 4)
+ *  CHG_INT_BAT_I	(0x1 << 3)
+ *  CHG_INT_INLIM_I	(0x1 << 2)
+ *  CHG_INT_THM2_I	(0x1 << 1)
+ *  CHG_INT_BYP_I	(0x1 << 0)
+ *
+ * int[1]
+ *  CHG_INT2_INSEL_I		(0x1 << 7)
+ *  CHG_INT2_SYS_UVLO1_I	(0x1 << 6)
+ *  CHG_INT2_SYS_UVLO2_I	(0x1 << 5)
+ *  CHG_INT2_BAT_OILO_I		(0x1 << 4)
+ *  CHG_INT2_CHG_STA_CC_I	(0x1 << 3)
+ *  CHG_INT2_CHG_STA_CV_I	(0x1 << 2)
+ *  CHG_INT2_CHG_STA_TO_I	(0x1 << 1)
+ *  CHG_INT2_CHG_STA_DONE_I	(0x1 << 0)
+ *
+ * these 3 cause unnecessary chatter at EOC due to the interaction between
+ * the CV and the IIN loop:
+ *   MAX77759_CHG_INT2_MASK_CHG_STA_CC_M |
+ *   MAX77759_CHG_INT2_MASK_CHG_STA_CV_M |
+ *   MAX77759_CHG_INT_MASK_CHG_M
+ *
+ * TODO: MAX77759_CHG_INT_MASK_AICL_M needs to be throttled
+ * if system keeps going in and out of AICL regulation.
+ * No evidenvce of this happening so far.
+ */
+static u8 max77759_int_mask[MAX77759_CHG_INT_COUNT] = {
+	(u8)~(MAX77759_CHG_INT_MASK_AICL_M |
+	  MAX77759_CHG_INT_MASK_CHGIN_M |
+	  MAX77759_CHG_INT_MASK_WCIN_M |
+	  MAX77759_CHG_INT_MASK_BAT_M |
+	  MAX77759_CHG_INT_INLIM_I_MASK |
+	  MAX77759_CHG_INT_MASK_THM2_M_MASK),
+	(u8)~(MAX77759_CHG_INT2_MASK_INSEL_M |
+	  MAX77759_CHG_INT2_MASK_SYS_UVLO1_M |
+	  MAX77759_CHG_INT2_MASK_SYS_UVLO2_M |
+	  MAX77759_CHG_INT2_MASK_CHG_STA_TO_M |
+	  MAX77759_CHG_INT2_MASK_CHG_STA_DONE_M),
+};
+
+static int max77759_is_limited(struct max77759_chgr_data *data);
+static int max77759_wcin_current_now(struct max77759_chgr_data *data, int *iic);
 
 static inline int max77759_reg_read(struct regmap *regmap, uint8_t reg,
 				    uint8_t *val)
@@ -121,134 +178,61 @@ static int max77759_resume_check(struct max77759_chgr_data *data)
 	return ret;
 }
 
-static int max77759_get_vdroop_ok(struct i2c_client *client, bool *state)
+int max77759_external_reg_read(struct device *dev, uint8_t reg, uint8_t *val)
 {
 	struct max77759_chgr_data *data;
-	u8 val;
 
-	if (!client)
+	if (!dev)
 		return -ENODEV;
 
-	data = i2c_get_clientdata(client);
+	data = dev_get_drvdata(dev);
 	if (!data || !data->regmap)
 		return -ENODEV;
 
 	if (max77759_resume_check(data))
 		return -EAGAIN;
 
-	if (max77759_reg_read(data->regmap, MAX77759_CHG_DETAILS_01, &val) < 0)
+	if (max77759_readn(data->regmap, reg, val, 2) < 0)
 		return -EINVAL;
 
-	*state = _chg_details_01_vdroop2_ok_get(val);;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(max77759_external_reg_read);
 
-static int max77759_get_batoilo_lvl(struct i2c_client *client, unsigned int *lvl)
+static int max77759_chg_prot(struct regmap *regmap, bool enable);
+
+int max77759_external_reg_write(struct device *dev, uint8_t reg, uint8_t val)
 {
 	struct max77759_chgr_data *data;
-	u8 val;
+	int prot;
+	int ret = 0;
 
-	if (!client)
+	if (!dev)
 		return -ENODEV;
 
-	data = i2c_get_clientdata(client);
+	data = dev_get_drvdata(dev);
 	if (!data || !data->regmap)
 		return -ENODEV;
 
 	if (max77759_resume_check(data))
 		return -EAGAIN;
 
-	if (max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_14, &val) < 0)
-		return -EINVAL;
-	*lvl = (BO_STEP * ((val & MAX77759_CHG_CNFG_14_BAT_OILO_MASK)
-			>> MAX77759_CHG_CNFG_14_BAT_OILO_SHIFT) + BO_LOWER_LIMIT);
-	return 0;
-}
-
-static int max77759_set_batoilo_lvl(struct i2c_client *client, unsigned int lvl)
-{
-	struct max77759_chgr_data *data;
-	u8 val;
-
-	if (!client)
-		return -ENODEV;
-
-	data = i2c_get_clientdata(client);
-	if (!data || !data->regmap)
-		return -ENODEV;
-
-	if (max77759_resume_check(data))
-		return -EAGAIN;
-
-	/* TODO: use rmw */
-	if (max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_14, &val) < 0)
-		return -EINVAL;
-	val &= ~MAX77759_CHG_CNFG_14_BAT_OILO_MASK;
-	val |= (lvl - BO_LOWER_LIMIT) / 200;
-	if (max77759_reg_write(data->regmap, MAX77759_CHG_CNFG_14, val) < 0)
+	prot = max77759_chg_prot(data->regmap, false);
+	if (prot < 0)
 		return -EIO;
-	return 0;
+
+	if (max77759_reg_write(data->regmap, reg, val))
+		ret = -EIO;
+
+	prot = max77759_chg_prot(data->regmap, true);
+	if (prot < 0) {
+		dev_err(data->dev, "%s: cannot restore protection bits (%d)\n",
+			__func__, prot);
+		return prot;
+	}
+	return ret;
 }
-
-static int max77759_get_uvlo_lvl(struct i2c_client *client, uint8_t mode, unsigned int *lvl)
-{
-	struct max77759_chgr_data *data;
-	u8 val;
-	u8 reg;
-
-	if (!client)
-		return -ENODEV;
-
-	data = i2c_get_clientdata(client);
-	if (!data || !data->regmap)
-		return -ENODEV;
-
-	if (max77759_resume_check(data))
-		return -EAGAIN;
-
-	reg = (mode == 1) ? MAX77759_CHG_CNFG_15 : MAX77759_CHG_CNFG_16;
-
-	if (max77759_reg_read(data->regmap, reg, &val) < 0)
-		return -EINVAL;
-	*lvl = VD_STEP * ((val & MAX77759_CHG_CNFG_15_SYS_UVLO1_MASK)
-			  >> MAX77759_CHG_CNFG_15_SYS_UVLO1_SHIFT) + VD_LOWER_LIMIT;
-	return 0;
-}
-
-static int max77759_set_uvlo_lvl(struct i2c_client *client, uint8_t mode, unsigned int lvl)
-{
-	struct max77759_chgr_data *data;
-	u8 val;
-	u8 reg;
-
-	if (!client)
-		return -ENODEV;
-
-	data = i2c_get_clientdata(client);
-	if (!data || !data->regmap)
-		return -ENODEV;
-
-	if (max77759_resume_check(data))
-		return -EAGAIN;
-
-	reg = (mode == UVLO1) ? MAX77759_CHG_CNFG_15 : MAX77759_CHG_CNFG_16;
-
-	if (max77759_reg_read(data->regmap, reg, &val) < 0)
-		return -EINVAL;
-	val &= ~MAX77759_CHG_CNFG_15_SYS_UVLO1_MASK;
-	val |= (lvl - VD_LOWER_LIMIT) / 50;
-	if (max77759_reg_write(data->regmap, reg, val) < 0)
-		return -EIO;
-	return 0;
-}
-
-static const struct bcl_ifpmic_ops bcl_ifpmic_ops = {
-	max77759_get_vdroop_ok,
-	max77759_set_uvlo_lvl,
-	max77759_get_uvlo_lvl,
-	max77759_set_batoilo_lvl,
-	max77759_get_batoilo_lvl,
-};
+EXPORT_SYMBOL_GPL(max77759_external_reg_write);
 
 /* ----------------------------------------------------------------------- */
 
@@ -920,10 +904,19 @@ static int max77759_set_insel(struct max77759_chgr_data *data,
 		wlc_on = wlc_on || (insel_value & MAX77759_CHG_CNFG_12_WCINSEL) != 0;
 
 		/* b/182973431 disable WLC_IC while CHGIN, rtx will enable WLC later */
-		ret = gs101_wlc_en(uc_data, wlc_on);
+		if (wlc_on)
+			ret = gs101_wlc_en(uc_data, WLC_ENABLED);
+		else if (data->wlc_spoof)
+			ret = gs101_wlc_en(uc_data, WLC_SPOOFED);
+		else
+			ret = gs101_wlc_en(uc_data, WLC_DISABLED);
+
 		if (ret < 0)
 			pr_err("%s: error wlc_en=%d ret:%d\n", __func__,
 			       wlc_on, ret);
+
+		/* reset wlc_spoof */
+		data->wlc_spoof = false;
 	} else {
 		u8 value = 0;
 
@@ -967,7 +960,7 @@ static int max77759_set_usecase(struct max77759_chgr_data *data,
 		}
 	}
 
-	/* Need this only for for usecases that control the switches */
+	/* Need this only for usecases that control the switches */
 	if (!uc_data->init_done) {
 		uc_data->init_done = gs101_setup_usecases(uc_data, data->dev->of_node, data->dev);
 
@@ -1032,7 +1025,7 @@ exit_done:
 	return ret;
 }
 
-static int max77759_wcin_is_online(struct max77759_chgr_data *data);
+static int max77759_wcin_is_valid(struct max77759_chgr_data *data);
 
 /*
  * I am using a the comparator_none, need scan all the votes to determine
@@ -1076,12 +1069,12 @@ static int max77759_mode_callback(struct gvotable_election *el,
 	cb_data.el = el;	/* election */
 
 	/* read directly instead of using the vote */
-	cb_data.wlc_rx = max77759_wcin_is_online(data) &&
+	cb_data.wlc_rx = max77759_wcin_is_valid(data) &&
 			 !data->wcin_input_suspend;
 	cb_data.wlcin_off = !!data->wcin_input_suspend;
 
-	pr_debug("%s: wcin_is_online=%d data->wcin_input_suspend=%d\n", __func__,
-		  max77759_wcin_is_online(data), data->wcin_input_suspend);
+	pr_debug("%s: wcin_is_valid=%d data->wcin_input_suspend=%d\n", __func__,
+		  max77759_wcin_is_valid(data), data->wcin_input_suspend);
 
 	/* now scan all the reasons, accumulate in cb_data */
 	gvotable_election_for_each(el, max77759_foreach_callback, &cb_data);
@@ -1281,6 +1274,36 @@ static int max77759_enable_sw_recharge(struct max77759_chgr_data *data,
 	return ret;
 }
 
+static int max77759_higher_headroom_enable(struct max77759_chgr_data *data, bool flag)
+{
+	int ret = 0;
+	u8 reg, reg_rd;
+	const u8 val = flag ? CHGR_CHG_CNFG_12_VREG_4P7V : CHGR_CHG_CNFG_12_VREG_4P6V;
+
+	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_12, &reg);
+	if (ret < 0)
+		return ret;
+
+	reg_rd = reg;
+	ret = max77759_chg_prot(data->regmap, false);
+	if (ret < 0)
+		return ret;
+
+	reg = _chg_cnfg_12_vchgin_reg_set(reg, val);
+	ret = max77759_reg_write(data->regmap, MAX77759_CHG_CNFG_12, reg);
+	if (ret)
+		dev_info(data->dev, "%s: error setting headroom to %d (%d)\n",
+			 __func__, val, ret);
+
+	dev_dbg(data->dev, "%s: val: %#02x, reg: %#02x -> %#02x (%d)\n",
+		__func__, val, reg_rd, reg, ret);
+
+	ret = max77759_chg_prot(data->regmap, true);
+	if (ret < 0)
+		dev_err(data->dev, "%s: error enabling prot (%d)\n", __func__, ret);
+	return ret < 0 ? ret : 0;
+}
+
 /* called from gcpm and for CC_MAX == 0 */
 static int max77759_set_charge_enabled(struct max77759_chgr_data *data,
 				       int enabled, const char *reason)
@@ -1304,6 +1327,11 @@ static int max77759_set_charge_disable(struct max77759_chgr_data *data,
 		if (ret < 0)
 			dev_err(data->dev, "%s cannot re-enable charging (%d)\n",
 				__func__, ret);
+
+		ret = max77759_higher_headroom_enable(data, false); /* reset on plug/unplug */
+		if (ret)
+			dev_err_ratelimited(data->dev, "%s error disabling higher headroom,"
+					    "ret:%d\n", __func__, ret);
 	}
 
 	return gvotable_cast_long_vote(data->mode_votable, reason,
@@ -1391,8 +1419,9 @@ static int max77759_set_charger_current_max_ua(struct max77759_chgr_data *data,
 					       int current_ua)
 {
 	const int disabled = current_ua == 0;
-	u8 value;
+	u8 value, reg;
 	int ret;
+	bool cp_enabled;
 
 	if (current_ua < 0)
 		return 0;
@@ -1407,6 +1436,16 @@ static int max77759_set_charger_current_max_ua(struct max77759_chgr_data *data,
 	else
 		value = 0x3 + (current_ua - 200000) / 66670;
 
+	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_00, &reg);
+	if (ret < 0) {
+		dev_err(data->dev, "cannot read CHG_CNFG_00 (%d)\n", ret);
+		return ret;
+	}
+
+	cp_enabled = _chg_cnfg_00_cp_en_get(reg);
+	if (cp_enabled)
+		goto update_reg;
+
 	/*
 	 * cc_max > 0 might need to restart charging: the usecase state machine
 	 * will be triggered in max77759_set_charge_enabled()
@@ -1416,7 +1455,7 @@ static int max77759_set_charger_current_max_ua(struct max77759_chgr_data *data,
 		if (ret < 0)
 			dev_err(data->dev, "cannot re-enable charging (%d)\n", ret);
 	}
-
+update_reg:
 	value = VALUE2FIELD(MAX77759_CHG_CNFG_02_CHGCC, value);
 	ret = max77759_reg_update(data, MAX77759_CHG_CNFG_02,
 				   MAX77759_CHG_CNFG_02_CHGCC_MASK,
@@ -1608,20 +1647,23 @@ static int max77759_dcicl_callback(struct gvotable_election *el,
 				   void *value)
 {
 	struct max77759_chgr_data *data = gvotable_get_data(el);
-	int dc_icl = (long)value;
-	const bool suspend = dc_icl == 0;
+	const bool suspend = (long)value == 0;
 	int ret;
 
 	pr_debug("%s: DC_ICL reason=%s, value=%ld suspend=%d\n",
 		 __func__, reason ? reason : "", (long)value, suspend);
 
+	data->dc_icl = (long)value;
 	/* doesn't trigger a CHARGER_MODE */
-	ret = max77759_wcin_set_ilim_max_ua(data, dc_icl);
+	ret = max77759_wcin_set_ilim_max_ua(data, data->dc_icl);
 	if (ret < 0)
 		dev_err(data->dev, "cannot set dc_icl=%d (%d)\n",
-			dc_icl, ret);
+			data->dc_icl, ret);
 
 	/* will trigger a CHARGER_MODE callback */
+	if (suspend && strcmp(reason, REASON_MDIS) == 0)
+		data->wlc_spoof = true;
+
 	ret = max77759_wcin_input_suspend(data, suspend, "DC_ICL");
 	if (ret < 0)
 		dev_err(data->dev, "cannot set suspend=%d (%d)\n",
@@ -1629,6 +1671,115 @@ static int max77759_dcicl_callback(struct gvotable_election *el,
 
 	return 0;
 }
+
+static void max77759_wcin_inlim_work(struct work_struct *work)
+{
+	struct max77759_chgr_data *data = container_of(work, struct max77759_chgr_data,
+						       wcin_inlim_work.work);
+	int iwcin, wcin_soft_icl, dc_icl_prev, ret;
+	char reason[GVOTABLE_MAX_REASON_LEN];
+
+	mutex_lock(&data->wcin_inlim_lock);
+	if (max77759_wcin_current_now(data, &iwcin))
+		goto done;
+
+	if (!data->dc_icl_votable) {
+		dev_err(data->dev, "Could not get votable: DC_ICL\n");
+		return;
+	}
+
+	 dc_icl_prev = data->dc_icl;
+	 gvotable_get_current_reason(data->dc_icl_votable, reason, GVOTABLE_MAX_REASON_LEN);
+
+	if (!data->wcin_soft_icl)
+		wcin_soft_icl = iwcin + data->wcin_inlim_headroom;
+		/* soft icl < hard icl */
+	else if (data->wcin_inlim_flag && !strcmp(reason, WCIN_INLIM_VOTER))
+		wcin_soft_icl = data->wcin_soft_icl + data->wcin_inlim_step;
+	else if (data->wcin_soft_icl > iwcin + data->wcin_inlim_headroom)
+		wcin_soft_icl = iwcin + data->wcin_inlim_headroom;
+	else
+		wcin_soft_icl = data->wcin_soft_icl;
+
+	gvotable_cast_int_vote(data->dc_icl_votable, WCIN_INLIM_VOTER, wcin_soft_icl, true);
+	dev_dbg(data->dev, "%s: iwcin: %d, soft_icl: %d->%d, prev_dc_icl: %d, limited: %d\n",
+		__func__, iwcin, data->wcin_soft_icl, wcin_soft_icl, dc_icl_prev,
+		data->wcin_inlim_flag);
+	data->wcin_soft_icl = wcin_soft_icl;
+
+done:
+	mutex_unlock(&data->wcin_inlim_lock);
+
+	max77759_int_mask[0] &= ~MAX77759_CHG_INT_INLIM_I_MASK;
+	ret = max77759_writen(data->regmap, MAX77759_CHG_INT_MASK,
+					max77759_int_mask,
+					sizeof(max77759_int_mask));
+	if (ret < 0)
+		dev_err(data->dev, "cannot set irq_mask (%d)\n", ret);
+	schedule_delayed_work(&data->wcin_inlim_work, msecs_to_jiffies(data->wcin_inlim_period));
+}
+
+static void max77759_wcin_inlim_work_en(struct max77759_chgr_data *data, bool en)
+{
+	mutex_lock(&data->wcin_inlim_lock);
+	dev_info(data->dev, "%s: en: %d\n", __func__, en);
+	if (en) {
+		schedule_delayed_work(&data->wcin_inlim_work, 0);
+	} else {
+		cancel_delayed_work(&data->wcin_inlim_work);
+		data->wcin_soft_icl = 0;
+		if (data->dc_icl_votable)
+			gvotable_cast_int_vote(data->dc_icl_votable, WCIN_INLIM_VOTER,
+						data->wcin_soft_icl, false);
+	}
+	mutex_unlock(&data->wcin_inlim_lock);
+}
+
+#if IS_ENABLED(CONFIG_GPIOLIB)
+static int max77759_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
+{
+	return GPIOF_DIR_OUT;
+}
+
+static int max77759_gpio_get(struct gpio_chip *chip, unsigned int offset)
+{
+	return 0;
+}
+
+static void max77759_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
+{
+	struct max77759_chgr_data *data = gpiochip_get_data(chip);
+	int ret = 0;
+
+	switch (offset) {
+	case MAX77759_GPIO_WCIN_INLIM_EN:
+		data->wcin_inlim_en = !!value;
+		max77759_wcin_inlim_work_en(data, data->wcin_inlim_en);
+		break;
+
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	if (ret < 0)
+		dev_err(data->dev, "GPIO %d: value=%d ret:%d\n", offset, value, ret);
+	else
+		dev_dbg(data->dev, "GPIO %d: value=%d ret:%d\n", offset, value, ret);
+}
+
+static void max77759_gpio_init(struct max77759_chgr_data *data)
+{
+	data->gpio.owner = THIS_MODULE;
+	data->gpio.label = "max77759_gpio";
+	data->gpio.get_direction = max77759_gpio_get_direction;
+	data->gpio.get = max77759_gpio_get;
+	data->gpio.set = max77759_gpio_set;
+	data->gpio.base = -1;
+	data->gpio.ngpio = MAX77759_NUM_GPIOS;
+	data->gpio.can_sleep = true;
+}
+#endif
 
 /*************************
  * WCIN PSY REGISTRATION   *
@@ -1644,11 +1795,18 @@ static enum power_supply_property max77759_wcin_props[] = {
 
 static int max77759_wcin_is_valid(struct max77759_chgr_data *data)
 {
-	uint8_t int_ok;
+	uint8_t val;
+	uint8_t wcin_dtls;
 	int ret;
 
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_INT_OK, &int_ok);
-	return (ret == 0) && _chg_int_ok_wcin_ok_get(int_ok);
+	ret = max77759_reg_read(data->regmap, MAX77759_CHG_DETAILS_00, &val);
+	if (ret < 0)
+		return ret;
+	wcin_dtls = _chg_details_00_wcin_dtls_get(val);
+	if (wcin_dtls == 0x2 || wcin_dtls == 0x3)
+		return 1;
+	else
+		return 0;
 }
 
 static int max77759_wcin_is_online(struct max77759_chgr_data *data)
@@ -1920,38 +2078,6 @@ static int max77759_init_wcin_psy(struct max77759_chgr_data *data)
 		return PTR_ERR(data->wcin_psy);
 
 	return 0;
-}
-
-static int max77759_higher_headroom_enable(struct max77759_chgr_data *data, bool flag)
-{
-	int ret = 0;
-	u8 reg, reg_rd, val = flag ? CHGR_CHG_CNFG_12_VREG_4P7V : CHGR_CHG_CNFG_12_VREG_4P6V;
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_12, &reg);
-	if (ret < 0)
-		return ret;
-
-	reg_rd = reg;
-	ret = max77759_chg_prot(data->regmap, false);
-	if (ret < 0)
-		return ret;
-
-	reg = _chg_cnfg_12_vchgin_reg_set(reg, val);
-	ret = max77759_reg_write(data->regmap, MAX77759_CHG_CNFG_12, reg);
-	if (ret)
-		goto done;;
-
-	dev_dbg(data->dev, "%s: val: %#02x, reg: %#02x -> %#02x\n", __func__, val, reg_rd, reg);
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_12, &reg);
-	if (ret)
-		goto done;
-
-done:
-	ret = max77759_chg_prot(data->regmap, true);
-	if (ret < 0)
-		dev_err(data->dev, "%s: error enabling prot (%d)\n", __func__, ret);
-	return ret < 0 ? ret : 0;
 }
 
 static int max77759_chg_is_valid(struct max77759_chgr_data *data)
@@ -2256,7 +2382,8 @@ static int max77759_psy_set_property(struct power_supply *psy,
 				     const union power_supply_propval *pval)
 {
 	struct max77759_chgr_data *data = power_supply_get_drvdata(psy);
-	int ret = -EINVAL;
+	int ret = 0;
+	bool changed = false;
 
 	if (max77759_resume_check(data))
 		return -EAGAIN;
@@ -2268,11 +2395,31 @@ static int max77759_psy_set_property(struct power_supply *psy,
 		break;
 	/* Charge current is set to 0 to EOC */
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-		ret = max77759_set_charger_current_max_ua(data, pval->intval);
-		pr_debug("%s: charge_current=%d (%d)\n",
-			__func__, pval->intval, ret);
+	{
+		u8 reg;
+
+		ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_00, &reg);
+		if (ret)
+			break;
+
+		if ((pval->intval > 0 && !_chg_cnfg_00_cp_en_get(reg)
+		   && !_chg_cnfg_00_mode_get(reg))
+		   || pval->intval != data->cc_max) {
+			ret = max77759_set_charger_current_max_ua(data, pval->intval);
+			data->cc_max = pval->intval;
+			pr_debug("%s: charge_current=%d (%d)\n",
+				 __func__, pval->intval, ret);
+		}
+	}
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		if (data->uc_data.input_uv != pval->intval)
+			changed = true;
+		data->uc_data.input_uv = pval->intval;
+		pr_debug("%s: input_voltage=%d\n", __func__, pval->intval);
+		if (changed)
+			power_supply_changed(data->psy);
+		break;
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 		ret = max77759_set_regulation_voltage(data, pval->intval);
 		pr_debug("%s: charge_voltage=%d (%d)\n",
@@ -2291,6 +2438,7 @@ static int max77759_psy_set_property(struct power_supply *psy,
 			__func__, pval->intval, ret);
 		break;
 	default:
+		ret = -EINVAL;
 		break;
 	}
 
@@ -2319,6 +2467,8 @@ static int max77759_psy_get_property(struct power_supply *psy,
 		ret = max77759_get_charger_current_max_ua(data, &pval->intval);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		pval->intval = data->uc_data.input_uv;
+		break;
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 		ret = max77759_get_regulation_voltage_uv(data, &pval->intval);
 		break;
@@ -2369,7 +2519,7 @@ static int max77759_psy_is_writeable(struct power_supply *psy,
 {
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX: /* compat, same the next */
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX: /* input voltage limit */
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
@@ -2496,7 +2646,7 @@ static enum power_supply_property max77759_psy_props[] = {
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
-	POWER_SUPPLY_PROP_VOLTAGE_MAX,		/* compat */
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,		/* input voltage limit */
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_STATUS,
 };
@@ -2526,7 +2676,7 @@ static ssize_t show_fship_dtls(struct device *dev,
 	if (data->fship_dtls != -1)
 		goto exit_done;
 
-	if(max77759_resume_check(data))
+	if (max77759_resume_check(data))
 		return -EAGAIN;
 
 	ret = max77759_find_pmic(data);
@@ -2567,106 +2717,6 @@ exit_done:
 }
 
 static DEVICE_ATTR(fship_dtls, 0444, show_fship_dtls, NULL);
-
-/* -- BCL ------------------------------------------------------------------ */
-
-static int vdroop2_ok_get(void *d, u64 *val)
-{
-	struct max77759_chgr_data *data = d;
-	int ret = 0;
-	u8 chg_dtls1;
-
-	if(max77759_resume_check(data))
-		return -EAGAIN;
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_DETAILS_01, &chg_dtls1);
-	if (ret < 0)
-		return -ENODEV;
-
-	*val = _chg_details_01_vdroop2_ok_get(chg_dtls1);
-
-	return 0;
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(vdroop2_ok_fops, vdroop2_ok_get, NULL, "%llu\n");
-
-static int vdp1_stp_bst_get(void *d, u64 *val)
-{
-	struct max77759_chgr_data *data = d;
-	int ret = 0;
-	u8 chg_cnfg18;
-
-	if(max77759_resume_check(data))
-		return -EAGAIN;
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_18, &chg_cnfg18);
-	if (ret < 0)
-		return -ENODEV;
-
-	*val = _chg_cnfg_18_vdp1_stp_bst_get(chg_cnfg18);
-	return 0;
-}
-
-static int vdp1_stp_bst_set(void *d, u64 val)
-{
-	struct max77759_chgr_data *data = d;
-	int ret = 0;
-	u8 chg_cnfg18;
-	const u8 vdp1_stp_bst = (val > 0)? 0x1 : 0x0;
-
-	if(max77759_resume_check(data))
-		return -EAGAIN;
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_18, &chg_cnfg18);
-	if (ret < 0)
-		return -ENODEV;
-
-	chg_cnfg18 = _chg_cnfg_18_vdp1_stp_bst_set(chg_cnfg18, vdp1_stp_bst);
-	ret = max77759_reg_write(data->regmap, MAX77759_CHG_CNFG_18, chg_cnfg18);
-
-	return ret;
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(vdp1_stp_bst_fops, vdp1_stp_bst_get, vdp1_stp_bst_set, "%llu\n");
-
-static int vdp2_stp_bst_get(void *d, u64 *val)
-{
-	struct max77759_chgr_data *data = d;
-	int ret = 0;
-	u8 chg_cnfg18;
-
-	if(max77759_resume_check(data))
-		return -EAGAIN;
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_18, &chg_cnfg18);
-	if (ret < 0)
-		return -ENODEV;
-
-	*val = _chg_cnfg_18_vdp2_stp_bst_get(chg_cnfg18);
-	return 0;
-}
-
-static int vdp2_stp_bst_set(void *d, u64 val)
-{
-	struct max77759_chgr_data *data = d;
-	int ret = 0;
-	u8 chg_cnfg18;
-	const u8 vdp2_stp_bst = (val > 0)? 0x1 : 0x0;
-
-	if(max77759_resume_check(data))
-		return -EAGAIN;
-
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_18, &chg_cnfg18);
-	if (ret < 0)
-		return -ENODEV;
-
-	chg_cnfg18 = _chg_cnfg_18_vdp2_stp_bst_set(chg_cnfg18, vdp2_stp_bst);
-	ret = max77759_reg_write(data->regmap, MAX77759_CHG_CNFG_18, chg_cnfg18);
-
-	return ret;
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(vdp2_stp_bst_fops, vdp2_stp_bst_get, vdp2_stp_bst_set, "%llu\n");
 
 /* -- input protection ----------------------------------------------------- */
 
@@ -2755,41 +2805,51 @@ DEFINE_SIMPLE_ATTRIBUTE(debug_reg_rw_fops, max77759_chg_debug_reg_read,
 			max77759_chg_debug_reg_write, "%02llx\n");
 
 
-static ssize_t max77759_chg_show_reg_all(struct file *filp, char __user *buf,
-					size_t count, loff_t *ppos)
+static ssize_t registers_dump_show(struct device *dev, struct device_attribute *attr,
+				   char *buf)
 {
-	struct max77759_chgr_data *data = (struct max77759_chgr_data *)filp->private_data;
-	u32 reg_address;
-	u8 reg = 0;
-	char *tmp;
-	int ret = 0, len = 0;
+	struct max77759_chgr_data *data = dev_get_drvdata(dev);
+	static u8 *dump;
+	int ret = 0, offset = 0, i;
 
 	if (!data->regmap) {
 		pr_err("Failed to read, no regmap\n");
 		return -EIO;
 	}
 
-	tmp = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!tmp)
-		return -ENOMEM;
+	mutex_lock(&data->reg_dump_lock);
 
-	for (reg_address = 0xB0; reg_address <= 0xCC; reg_address++) {
-		ret = max77759_reg_read(data->regmap, reg_address, &reg);
-		if (ret < 0)
-			continue;
-
-		len += scnprintf(tmp + len, PAGE_SIZE - len, "%02x: %02x\n", reg_address, reg);
+	dump = kzalloc(MAX77759_CHG_NUM_REGS * sizeof(u8), GFP_KERNEL);
+	if (!dump) {
+		dev_err(dev, "[%s]: Failed to allocate mem ret:%d\n", __func__, ret);
+		goto unlock;
 	}
 
-	if (len > 0)
-		len = simple_read_from_buffer(buf, count,  ppos, tmp, strlen(tmp));
+	ret = max77759_readn(data->regmap, MAX77759_CHG_INT, dump, MAX77759_CHG_NUM_REGS);
+	if (ret < 0) {
+		dev_err(dev, "[%s]: Failed to dump ret:%d\n", __func__, ret);
+		goto done;
+	}
 
-	kfree(tmp);
+	for (i = 0; i < MAX77759_CHG_NUM_REGS; i++) {
+		u32 reg_address = i + MAX77759_CHG_INT;
 
-	return len;
+		ret = sysfs_emit_at(buf, offset, "%02x: %02x\n", reg_address, dump[i]);
+		if (!ret) {
+			dev_err(dev, "[%s]: Not all registers printed. last:%x\n", __func__,
+				reg_address - 1);
+			break;
+		}
+		offset += ret;
+	}
+
+done:
+	kfree(dump);
+unlock:
+	mutex_unlock(&data->reg_dump_lock);
+	return offset;
 }
-
-BATTERY_DEBUG_ATTRIBUTE(debug_all_reg_fops, max77759_chg_show_reg_all, NULL);
+static DEVICE_ATTR_RO(registers_dump);
 
 static int dbg_init_fs(struct max77759_chgr_data *data)
 {
@@ -2798,6 +2858,10 @@ static int dbg_init_fs(struct max77759_chgr_data *data)
 	ret = device_create_file(data->dev, &dev_attr_fship_dtls);
 	if (ret != 0)
 		pr_err("Failed to create fship_dtls, ret=%d\n", ret);
+
+	ret = device_create_file(data->dev, &dev_attr_registers_dump);
+	if (ret != 0)
+		dev_warn(data->dev, "Failed to create registers_dump, ret=%d\n", ret);
 
 	data->de = debugfs_create_dir("max77759_chg", 0);
 	if (IS_ERR_OR_NULL(data->de))
@@ -2809,14 +2873,6 @@ static int dbg_init_fs(struct max77759_chgr_data *data)
 	debugfs_create_atomic_t("early_topoff_cnt", 0644, data->de,
 				&data->early_topoff_cnt);
 
-	/* BCL */
-	debugfs_create_file("vdroop2_ok", 0400, data->de, data,
-			    &vdroop2_ok_fops);
-	debugfs_create_file("vdp1_stp_bst", 0600, data->de, data,
-			    &vdp1_stp_bst_fops);
-	debugfs_create_file("vdp2_stp_bst", 0600, data->de, data,
-			    &vdp2_stp_bst_fops);
-
 	debugfs_create_file("input_mask_clear", 0600, data->de, data,
 			    &input_mask_clear_fops);
 	debugfs_create_file("chg_restart", 0600, data->de, data,
@@ -2824,8 +2880,11 @@ static int dbg_init_fs(struct max77759_chgr_data *data)
 
 	debugfs_create_u32("address", 0600, data->de, &data->debug_reg_address);
 	debugfs_create_file("data", 0600, data->de, data, &debug_reg_rw_fops);
-	/* dump all registers */
-	debugfs_create_file("registers", 0444, data->de, data, &debug_all_reg_fops);
+
+	debugfs_create_u32("inlim_period", 0600, data->de, &data->wcin_inlim_period);
+	debugfs_create_u32("inlim_headroom", 0600, data->de, &data->wcin_inlim_headroom);
+	debugfs_create_u32("inlim_step", 0600, data->de, &data->wcin_inlim_step);
+
 	return 0;
 }
 
@@ -2872,80 +2931,54 @@ static void max77759_aicl_changed(struct max77759_chgr_data *data)
 	gvotable_cast_long_vote(data->aicl_active_el, "BMS_VOTER", aicl_active, aicl_active);
 }
 
-/*
- * int[0]
- *  CHG_INT_AICL_I	(0x1 << 7)
- *  CHG_INT_CHGIN_I	(0x1 << 6)
- *  CHG_INT_WCIN_I	(0x1 << 5)
- *  CHG_INT_CHG_I	(0x1 << 4)
- *  CHG_INT_BAT_I	(0x1 << 3)
- *  CHG_INT_INLIM_I	(0x1 << 2)
- *  CHG_INT_THM2_I	(0x1 << 1)
- *  CHG_INT_BYP_I	(0x1 << 0)
- *
- * int[1]
- *  CHG_INT2_INSEL_I		(0x1 << 7)
- *  CHG_INT2_SYS_UVLO1_I	(0x1 << 6)
- *  CHG_INT2_SYS_UVLO2_I	(0x1 << 5)
- *  CHG_INT2_BAT_OILO_I		(0x1 << 4)
- *  CHG_INT2_CHG_STA_CC_I	(0x1 << 3)
- *  CHG_INT2_CHG_STA_CV_I	(0x1 << 2)
- *  CHG_INT2_CHG_STA_TO_I	(0x1 << 1)
- *  CHG_INT2_CHG_STA_DONE_I	(0x1 << 0)
- *
- * these 3 cause un-necessary chatter at EOC due to the interaction between
- * the CV and the IIN loop:
- *   MAX77759_CHG_INT2_MASK_CHG_STA_CC_M |
- *   MAX77759_CHG_INT2_MASK_CHG_STA_CV_M |
- *   MAX77759_CHG_INT_MASK_CHG_M
- *
- * TODO: MAX77759_CHG_INT_MASK_AICL_M needs to be throttled
- * if system keeps going in and out of AICL regulation.
- * No evidenvce of this happening so far.
- */
-static u8 max77759_int_mask[MAX77759_CHG_INT_COUNT] = {
-	(u8)~(MAX77759_CHG_INT_MASK_AICL_M |
-	  MAX77759_CHG_INT_MASK_CHGIN_M |
-	  MAX77759_CHG_INT_MASK_WCIN_M |
-	  MAX77759_CHG_INT_MASK_BAT_M |
-	  MAX77759_CHG_INT_MASK_THM2_M_MASK),
-	(u8)~(MAX77759_CHG_INT2_MASK_INSEL_M |
-	  MAX77759_CHG_INT2_MASK_SYS_UVLO1_M |
-	  MAX77759_CHG_INT2_MASK_SYS_UVLO2_M |
-	  MAX77759_CHG_INT2_MASK_CHG_STA_TO_M |
-	  MAX77759_CHG_INT2_MASK_CHG_STA_DONE_M),
-};
 
 static irqreturn_t max77759_chgr_irq(int irq, void *client)
 {
 	struct max77759_chgr_data *data = client;
 	u8 chg_int[MAX77759_CHG_INT_COUNT];
+	u8 chg_int_clr[MAX77759_CHG_INT_COUNT];
 	bool broadcast;
 	int ret;
 
 	if (max77759_resume_check(data)) {
-		if (data->init_complete && !data->irq_disabled) {
-			data->irq_disabled = true;
-			disable_irq_nosync(data->irq_int);
-		}
+		dev_warn_ratelimited(data->dev, "%s: irq skipped, irq:%d\n", __func__, irq);
 		return IRQ_HANDLED;
 	}
 
 	ret = max77759_readn(data->regmap, MAX77759_CHG_INT, chg_int,
 			     sizeof(chg_int));
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err_ratelimited(data->dev, "%s i2c error reading CHG INT, ret:%d\n",
+				    __func__, ret);
 		return IRQ_NONE;
+	}
 
 	if ((chg_int[0] & ~max77759_int_mask[0]) == 0 &&
 	    (chg_int[1] & ~max77759_int_mask[1]) == 0)
 		return IRQ_NONE;
 
-	ret = max77759_writen(data->regmap, MAX77759_CHG_INT, chg_int,
-			      sizeof(chg_int));
-	if (ret < 0)
+	chg_int_clr[0] = chg_int[0];
+	chg_int_clr[1] = chg_int[1] & (~MAX77759_CHG_INT2_BAT_OILO_I &
+					~MAX77759_CHG_INT2_SYS_UVLO2_I &
+					~MAX77759_CHG_INT2_SYS_UVLO1_I);
+
+	ret = max77759_writen(data->regmap, MAX77759_CHG_INT, /* NOTYPO */
+                              chg_int_clr, sizeof(chg_int_clr));
+	if (ret < 0) {
+		dev_err_ratelimited(data->dev, "%s i2c error writing CHG INT, ret:%d\n",
+				    __func__, ret);
 		return IRQ_NONE;
+	}
 
 	pr_debug("INT : %02x %02x\n", chg_int[0], chg_int[1]);
+
+	/* No need to monitor wcin_inlim when on USB */
+	if (chg_int[0] & MAX77759_CHG_INT_CHGIN_I_MASK) {
+		if (max77759_chgin_is_online(data))
+			max77759_wcin_inlim_work_en(data, false);
+		else if (data->wcin_inlim_en)
+			max77759_wcin_inlim_work_en(data, true);
+	}
 
 	/* always broadcast battery events */
 	broadcast = chg_int[0] & MAX77759_CHG_INT_MASK_BAT_M;
@@ -2958,36 +2991,9 @@ static irqreturn_t max77759_chgr_irq(int irq, void *client)
 		pr_debug("%s: INSEL insel_auto_clear=%d (%d)\n", __func__,
 			 data->insel_clear, data->insel_clear ? ret : 0);
 		atomic_inc(&data->insel_cnt);
-
-		ret = max77759_higher_headroom_enable(data, false); /* reset on plug/unplug */
-		if (ret)
-			return IRQ_NONE;
 	}
 
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
 	/* TODO: make this an interrupt controller */
-	if (chg_int[1] & MAX77759_CHG_INT2_SYS_UVLO1_I) {
-		pr_debug("%s: SYS_UVLO1\n", __func__);
-
-		if (data->bcl_dev)
-			google_bcl_irq_changed(data->bcl_dev, UVLO1);
-	}
-
-	if (chg_int[1] & MAX77759_CHG_INT2_SYS_UVLO2_I) {
-		pr_debug("%s: SYS_UVLO2\n", __func__);
-
-		if (data->bcl_dev)
-			google_bcl_irq_changed(data->bcl_dev, UVLO2);
-	}
-
-	if (chg_int[1] & MAX77759_CHG_INT2_BAT_OILO_I) {
-		pr_debug("%s: BAT_OILO\n", __func__);
-
-		if (data->bcl_dev)
-			google_bcl_irq_changed(data->bcl_dev, BATOILO);
-	}
-#endif
-
 	if (chg_int[1] & MAX77759_CHG_INT2_MASK_CHG_STA_TO_M) {
 		pr_debug("%s: TOP_OFF\n", __func__);
 
@@ -3000,6 +3006,20 @@ static irqreturn_t max77759_chgr_irq(int irq, void *client)
 			atomic_inc(&data->early_topoff_cnt);
 		}
 
+	}
+
+	if (chg_int[0] & MAX77759_CHG_INT_INLIM_I_MASK) {
+		int inlim = max77759_is_limited(data);
+
+		pr_debug("%s: INLIM limited: %d\n", __func__, inlim);
+		data->wcin_inlim_flag = inlim;
+
+		max77759_int_mask[0] |= MAX77759_CHG_INT_INLIM_I_MASK;
+		ret = max77759_writen(data->regmap, MAX77759_CHG_INT_MASK,
+					      max77759_int_mask,
+					      sizeof(max77759_int_mask));
+		if (ret < 0)
+			pr_err("%s: cannot set irq_mask (%d)\n", __func__, ret);
 	}
 
 	if (chg_int[1] & MAX77759_CHG_INT2_MASK_CHG_STA_CC_M)
@@ -3131,45 +3151,6 @@ static int max77759_setup_votables(struct max77759_chgr_data *data)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
-static void max77759_register_bcl(struct work_struct *work)
-{
-	struct max77759_chgr_data *data = container_of(work, struct max77759_chgr_data,
-						       init_bcl.work);
-	struct bcl_device *bcl_dev;
-
-	bcl_dev = google_retrieve_bcl_handle();
-	if (!bcl_dev)
-		goto retry_init_work;
-
-	if (google_bcl_register_ifpmic(bcl_dev, &bcl_ifpmic_ops) == 0)
-		data->bcl_dev = bcl_dev;
-
-	return;
-retry_init_work:
-	schedule_delayed_work(&data->init_bcl, msecs_to_jiffies(1000));
-}
-
-static int max77759_init_bcl(struct max77759_chgr_data *data)
-{
-	u8 regdata;
-	int ret;
-
-	/* TODO: use RMW */
-	ret = max77759_reg_read(data->regmap, MAX77759_CHG_CNFG_17, &regdata);
-	if (ret == 0)
-		ret = max77759_reg_write(data->regmap, MAX77759_CHG_CNFG_17,
-					 regdata | BATOILO_DET_30US);
-	if (ret < 0)
-		return -EIO;
-
-	INIT_DELAYED_WORK(&data->init_bcl, max77759_register_bcl);
-	schedule_delayed_work(&data->init_bcl, msecs_to_jiffies(1000));
-
-	return ret;
-}
-#endif
-
 static void max77759_otg_fccm_worker(struct work_struct *work)
 {
 	struct max77759_chgr_data *data = container_of(work,
@@ -3237,23 +3218,18 @@ static int max77759_charger_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	data->dev = dev;
+	data->dev->init_name = "i2c-max77759chrg";
 	data->regmap = regmap;
 	data->fship_dtls = -1;
 	data->wden = false; /* TODO: read from DT */
 	mutex_init(&data->io_lock);
+	mutex_init(&data->wcin_inlim_lock);
+	mutex_init(&data->reg_dump_lock);
 	atomic_set(&data->insel_cnt, 0);
 	atomic_set(&data->early_topoff_cnt, 0);
 	i2c_set_clientdata(client, data);
 
-#if IS_ENABLED(CONFIG_GOOGLE_BCL)
-	/*
-	 * NOTE: this should possibly be retried later. Startip seems to be
-	 * a little "racey".
-	 */
-	ret = max77759_init_bcl(data);
-	if (ret < 0)
-	        pr_err("Failed to register BCL callback %d\n", ret);
-#endif
+	INIT_DELAYED_WORK(&data->wcin_inlim_work, max77759_wcin_inlim_work);
 
 	data->usecase_wake_lock = wakeup_source_register(NULL, "max77759-usecase");
 	if (!data->usecase_wake_lock) {
@@ -3282,36 +3258,6 @@ static int max77759_charger_probe(struct i2c_client *client)
 	data->uc_data.client = client;
 
 	INIT_DELAYED_WORK(&data->mode_rerun_work, max77759_mode_rerun_work);
-
-	irq_gpio = devm_gpiod_get(dev, "max77759,irq", GPIOD_ASIS);
-	if (IS_ERR(irq_gpio)) {
-		dev_err(dev, "failed get irq_gpio: %ld\n",
-			PTR_ERR(irq_gpio));
-	} else {
-		client->irq = gpiod_to_irq(irq_gpio);
-
-		ret = devm_request_threaded_irq(data->dev, client->irq, NULL,
-						max77759_chgr_irq,
-						IRQF_TRIGGER_LOW |
-						IRQF_SHARED |
-						IRQF_ONESHOT,
-						"max77759_charger",
-						data);
-		if (ret == 0) {
-			enable_irq_wake(client->irq);
-
-			/* might cause the isr to be called */
-			max77759_chgr_irq(-1, data);
-			ret = max77759_writen(regmap, MAX77759_CHG_INT_MASK,
-					      max77759_int_mask,
-					      sizeof(max77759_int_mask));
-			if (ret < 0)
-				dev_err(dev, "cannot set irq_mask (%d)\n", ret);
-
-			data->irq_disabled = false;
-			data->irq_int = client->irq;
-		}
-	}
 
 	ret = dbg_init_fs(data);
 	if (ret < 0)
@@ -3394,6 +3340,33 @@ static int max77759_charger_probe(struct i2c_client *client)
 	else
 		data->uc_data.dcin_is_dock = false;
 
+	ret = of_property_read_u32(dev->of_node, "max77759,wcin-inlim-period",
+				   &data->wcin_inlim_period);
+	if (ret < 0)
+		data->wcin_inlim_period = WCIN_INLIM_T;
+
+	ret = of_property_read_u32(dev->of_node, "max77759,wcin-inlim-headroom",
+				   &data->wcin_inlim_headroom);
+	if (ret < 0)
+		data->wcin_inlim_headroom = WCIN_INLIM_HEADROOM_MA;
+
+	ret = of_property_read_u32(dev->of_node, "max77759,wcin_inlim_step",
+				   &data->wcin_inlim_step);
+	if (ret < 0)
+		data->wcin_inlim_step = WCIN_INLIM_STEP_MA;
+
+#if IS_ENABLED(CONFIG_GPIOLIB)
+	max77759_gpio_init(data);
+	data->gpio.parent = &client->dev;
+	data->gpio.of_node = of_find_node_by_name(client->dev.of_node,
+							    data->gpio.label);
+	if (!data->gpio.of_node)
+		dev_err(&client->dev, "Failed to find %s DT node\n", data->gpio.label);
+
+	ret = devm_gpiochip_add_data(&client->dev, &data->gpio, data);
+	dev_info(&client->dev, "%d GPIOs registered ret: %d\n", data->gpio.ngpio, ret);
+#endif
+
 	data->init_complete = 1;
 	data->resume_complete = 1;
 
@@ -3406,6 +3379,36 @@ static int max77759_charger_probe(struct i2c_client *client)
 	if (ret < 0)
 		pr_err("Couldn't register dc power supply (%d)\n", ret);
 
+	/* Init irq last */
+	irq_gpio = devm_gpiod_get(dev, "max77759,irq", GPIOD_ASIS);
+	if (IS_ERR(irq_gpio)) {
+		dev_err(dev, "failed get irq_gpio: %ld\n",
+			PTR_ERR(irq_gpio));
+	} else {
+		client->irq = gpiod_to_irq(irq_gpio);
+
+		ret = devm_request_threaded_irq(data->dev, client->irq, NULL,
+						max77759_chgr_irq,
+						IRQF_TRIGGER_LOW |
+						IRQF_SHARED |
+						IRQF_ONESHOT,
+						"max77759_charger",
+						data);
+		if (ret == 0) {
+			ret = max77759_writen(regmap, MAX77759_CHG_INT_MASK,
+					      max77759_int_mask,
+					      sizeof(max77759_int_mask));
+			if (ret < 0)
+				dev_err(dev, "cannot set irq_mask (%d)\n", ret);
+
+			data->irq_int = client->irq;
+			device_init_wakeup(dev, true);
+			ret = enable_irq_wake(client->irq);
+			if (ret)
+				dev_err(data->dev, "Error enabling irq wake ret:%d\n", ret);
+		}
+	}
+
 	dev_info(dev, "registered as %s\n", max77759_psy_desc.psy_dsc.name);
 	return 0;
 }
@@ -3416,6 +3419,8 @@ static void max77759_charger_remove(struct i2c_client *client)
 
 	if (data->de)
 		debugfs_remove(data->de);
+	disable_irq_wake(client->irq);
+	device_init_wakeup(data->dev, false);
 	wakeup_source_unregister(data->usecase_wake_lock);
 	wakeup_source_unregister(data->otg_fccm_wake_lock);
 }
@@ -3440,6 +3445,8 @@ static int max77759_charger_pm_suspend(struct device *dev)
 	struct max77759_chgr_data *data = platform_get_drvdata(pdev);
 
 	pm_runtime_get_sync(data->dev);
+	dev_dbg(dev, "%s\n", __func__);
+
 	data->resume_complete = false;
 	pm_runtime_put_sync(data->dev);
 
@@ -3452,12 +3459,9 @@ static int max77759_charger_pm_resume(struct device *dev)
 	struct max77759_chgr_data *data = platform_get_drvdata(pdev);
 
 	pm_runtime_get_sync(data->dev);
-	data->resume_complete = true;
-	if (data->irq_disabled) {
-		enable_irq(data->irq_int);
-		data->irq_disabled = false;
-	}
+	dev_dbg(dev, "%s\n", __func__);
 
+	data->resume_complete = true;
 	pm_runtime_put_sync(data->dev);
 
 	if ((data->otg_fccm_reset) && (data->otg_changed))
@@ -3468,7 +3472,7 @@ static int max77759_charger_pm_resume(struct device *dev)
 #endif
 
 static const struct dev_pm_ops max77759_charger_pm_ops = {
-	SET_LATE_SYSTEM_SLEEP_PM_OPS(
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(
 		max77759_charger_pm_suspend,
 		max77759_charger_pm_resume)
 };
