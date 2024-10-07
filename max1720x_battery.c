@@ -16,6 +16,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": %s " fmt, __func__
 
+#include <linux/cleanup.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
 #include <linux/iio/consumer.h>
@@ -2794,7 +2795,8 @@ static struct device_node *max1720x_find_batt_node(struct max1720x_chip *chip)
 {
 	const int batt_id = chip->batt_id;
 	const struct device *dev = chip->dev;
-	struct device_node *config_node, *child_node;
+	struct device_node *config_node __free(device_node);
+	struct device_node *child_node;
 	u32 batt_id_range = 20, batt_id_kohm;
 	int ret;
 
