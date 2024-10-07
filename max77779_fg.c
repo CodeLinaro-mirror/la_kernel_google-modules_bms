@@ -16,6 +16,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": %s " fmt, __func__
 
+#include <linux/cleanup.h>
 #include <linux/debugfs.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -2172,7 +2173,8 @@ static struct device_node *max77779_fg_find_batt_node(struct max77779_fg_chip *c
 {
 	const int batt_id = chip->batt_id;
 	const struct device *dev = chip->dev;
-	struct device_node *config_node, *child_node;
+	struct device_node *config_node __free(device_node) = NULL;
+	struct device_node *child_node;
 	u32 batt_id_kohm;
 	int ret;
 
