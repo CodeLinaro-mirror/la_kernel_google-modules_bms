@@ -14,6 +14,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/cleanup.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/version.h>
@@ -1404,7 +1405,8 @@ static inline void rt9471_irq_unmask(struct rt9471_chip *chip, int irqnum)
 static int rt9471_parse_dt(struct rt9471_chip *chip)
 {
 	int ret, len, irqcnt = 0, irqnum;
-	struct device_node *parent_np = chip->dev->of_node, *np = NULL;
+	struct device_node *parent_np = chip->dev->of_node;
+	struct device_node *np __free(device_node) = NULL;
 	struct rt9471_desc *desc = NULL;
 	const char *name = NULL;
 	char *ceb_name = NULL;
