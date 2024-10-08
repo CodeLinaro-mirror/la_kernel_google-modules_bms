@@ -15,6 +15,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/cleanup.h>
 #include <linux/kernel.h>
 #include <linux/printk.h>
 #include <linux/module.h>
@@ -978,7 +979,8 @@ static int gdbatt_init_pack_chg_profile(struct gbms_chg_profile *pack_profile,
 
 static int gdbatt_init_chg_profile(struct dual_fg_drv *dual_fg_drv)
 {
-	struct device_node *node = of_find_node_by_name(NULL, "google,battery");
+	struct device_node *node __free(device_node)
+		= of_find_node_by_name(NULL, "google,battery");
 	struct device_node *dual_fg_node = dual_fg_drv->device->of_node;
 	struct gbms_chg_profile *profile = &dual_fg_drv->chg_profile;
 	int ret = 0;
