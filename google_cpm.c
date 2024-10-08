@@ -3215,6 +3215,7 @@ static int mdis_tdev_register(const char *of_name, const char *tcd_name,
 	struct device_node *cooling_node = NULL;
 	int ret;
 
+	/* FIXME: this leaks cooling_node */
 	cooling_node = of_find_node_by_name(NULL, of_name);
 	if (!cooling_node) {
 		pr_err("No %s OF node for cooling device\n", of_name);

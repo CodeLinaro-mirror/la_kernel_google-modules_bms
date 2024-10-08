@@ -5416,6 +5416,7 @@ chg_thermal_device_register(const char *of_name,
 {
 	struct device_node *cooling_node = NULL;
 
+	/* FIXME: this leaks cooling_node */
 	cooling_node = of_find_node_by_name(NULL, of_name);
 	if (!cooling_node) {
 		pr_err("No %s OF node for cooling device\n",
