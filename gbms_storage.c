@@ -15,6 +15,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/cleanup.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/suspend.h>
@@ -1191,6 +1192,7 @@ static void gbee_destroy(struct gbee_data *beed)
 	gbms_storage_offline(beed->bee_name, true);
 	nvmem_device_put(beed->bee_nvram);
 	kfree(beed->bee_name);
+	of_node_put(beed->node);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1223,7 +1225,7 @@ static void gbms_storage_parse_provider_refs(const struct device_node *node)
 
 static int __init gbms_storage_init(void)
 {
-	struct device_node *node;
+	struct device_node *node __free(device_node) = NULL;
 	const int pe_size = entry_size(sizeof(struct gbms_cache_entry));
 	bool has_bee = false;
 
@@ -1277,7 +1279,7 @@ static int __init gbms_storage_init(void)
 			if (!beed->bee_name)
 				return -ENOMEM;
 			beed->bee_status = GBEE_STATUS_PROBE;
-			beed->node = node;
+			beed->node = of_node_get(node);
 
 			/* add the bee to the late arrivals */
 			gbms_storage_register_internal(NULL, beed->bee_name,
