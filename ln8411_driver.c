@@ -5593,6 +5593,8 @@ static int ln8411_probe(struct i2c_client *client)
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	ln8411_gpio_init(ln8411_charger);
 	ln8411_charger->gpio.parent = &client->dev;
+	/* balance of_node_put() in of_find_node_by_name() */
+	of_node_get(client->dev.of_node);
 	dn = of_find_node_by_name(client->dev.of_node,
 				  ln8411_charger->gpio.label);
 	if (!dn)
