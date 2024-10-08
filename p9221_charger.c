@@ -8381,6 +8381,7 @@ static int p9221_charger_probe(struct i2c_client *client)
 	dn = of_parse_phandle(of_node, "idt,fuel-gauge", 0);
 	if (dn)
 		schedule_delayed_work(&charger->soc_work, 0);
+	of_node_put(dn);
 
 	/*
 	 * Register notifier so we can detect changes on DC_IN

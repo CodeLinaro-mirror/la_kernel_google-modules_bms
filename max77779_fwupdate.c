@@ -5,6 +5,7 @@
  * MAX77779 firmware updater
  */
 
+#include <linux/cleanup.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -295,7 +296,6 @@ static inline int max77779_schedule_update(struct max77779_fwupdate* fwu)
 static int max77779_fwupdate_init(struct max77779_fwupdate *fwu)
 {
 	struct device* dev = fwu->dev;
-	struct device_node *dn;
 	int val = 0;
 
 	if (!dev)
@@ -335,6 +335,8 @@ static int max77779_fwupdate_init(struct max77779_fwupdate *fwu)
 	}
 
 	if (!fwu->batt) {
+		struct device_node *dn __free(device_node);
+
 		dn = of_parse_phandle(dev->of_node, "google,battery", 0);
 		if (!dn)
 			return -ENXIO;

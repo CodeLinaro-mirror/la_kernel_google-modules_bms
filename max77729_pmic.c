@@ -465,6 +465,7 @@ static int max77759_find_fg(struct max77729_pmic_data *data)
 		return -ENXIO;
 
 	data->fg_i2c_client = of_find_i2c_device_by_node(dn);
+	of_node_put(dn);
 	if (!data->fg_i2c_client)
 		return -EAGAIN;
 
