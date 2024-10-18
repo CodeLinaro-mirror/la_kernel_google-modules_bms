@@ -88,6 +88,7 @@ struct bias_config {
 #define BAT_TEMP_TOO_COLD			BIT(1)
 
 #define CHGR_FLOAT_VOLTAGE_NOW			0x260B
+#define CHGR_ICHG_STATUS_REG			0x260E
 #define CHGR_CHG_EN				0x2646
 #define CHARGING_ENABLE_CMD_BIT			BIT(0)
 
@@ -100,6 +101,14 @@ struct bias_config {
 #define CHGR_CHG_TERM_CFG_REG			0x2660
 #define CHGR_ITERM_USE_ANALOG_BIT		BIT(3)
 
+// Charge current reference gain registers, not in the datasheet.
+// _LC 0x26F1 : 0.1A < FCC ≤ 0.5A
+// _MC 0x26F2 : 0.5A < FCC ≤ 1A
+// _HC 0x26F3 : 1A < FCC ≤ 2A
+#define CHGR_TR_SBC_ICHG_GAIN_FULLON_LC_REG	0x26F1
+#define CHGR_TR_SBC_ICHG_GAIN_FULLON_MC_REG	0x26F2
+#define CHGR_TR_SBC_ICHG_GAIN_FULLON_HC_REG	0x26F3
+
 #define DCDC_ICL_STATUS_REG			0x2709
 #define DCDC_AICL_ICL_STATUS_REG		0x2707
 #define DCDC_AICL_STATUS_REG			0x2C06
@@ -109,6 +118,8 @@ struct bias_config {
 #define USE_USBIN_BIT				BIT(5)
 #define USE_DCIN_BIT				BIT(4)
 #define VALID_INPUT_POWER_SOURCE_STS_BIT	BIT(7)
+
+#define DCDC_INT_RT_STS_REG			0x2710
 
 #define MISC_AICL_CMD_REG			0x2C50
 
@@ -189,6 +200,11 @@ static int sw5100_masked_write(struct regmap *pmic_regmap,
 static int sw5100_rd8(struct regmap *pmic_regmap, int addr, u8 *val)
 {
 	return sw5100_read(pmic_regmap, addr, val, 1);
+}
+
+static int sw5100_wr8(struct regmap *pmic_regmap, int addr, u8 *val)
+{
+	return sw5100_write(pmic_regmap, addr, val, 1);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1167,6 +1183,81 @@ static ssize_t soc_shutdown_offset_show(struct device *dev, struct device_attrib
 
 static const DEVICE_ATTR_RW(soc_shutdown_offset);
 
+static ssize_t sysfs_store_pmic_reg(struct device *dev, const char *buf,
+		size_t count, const int addr)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct bms_dev *bms = power_supply_get_drvdata(psy);
+	u8 value;
+	int ret;
+
+	ret = kstrtou8(buf, 16, &value);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = sw5100_wr8(bms->pmic_regmap, addr, &value);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return count;
+}
+
+static ssize_t sysfs_show_pmic_reg(struct device *dev, char *buf,
+		const int addr)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct bms_dev *bms = power_supply_get_drvdata(psy);
+	u8 value;
+	int ret;
+
+	ret = sw5100_rd8(bms->pmic_regmap, addr, &value);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return sysfs_emit(buf, "0x%02hhx\n", value);
+}
+
+static ssize_t charge_gain_mc_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	return sysfs_store_pmic_reg(dev, buf, count, CHGR_TR_SBC_ICHG_GAIN_FULLON_MC_REG);
+}
+
+static ssize_t charge_gain_mc_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sysfs_show_pmic_reg(dev, buf, CHGR_TR_SBC_ICHG_GAIN_FULLON_MC_REG);
+}
+
+static const DEVICE_ATTR_RW(charge_gain_mc);
+
+static ssize_t charge_current_ref_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sysfs_show_pmic_reg(dev, buf, CHGR_ICHG_STATUS_REG);
+}
+
+static const DEVICE_ATTR_RO(charge_current_ref);
+
+static ssize_t dcdc_status_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sysfs_show_pmic_reg(dev, buf, DCDC_INT_RT_STS_REG);
+}
+
+static const DEVICE_ATTR_RO(dcdc_status);
+
+static ssize_t bat_chg_status_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sysfs_show_pmic_reg(dev, buf, CHGR_BATTERY_CHARGER_STATUS_REG);
+}
+
+static const DEVICE_ATTR_RO(bat_chg_status);
+
 static int sw5100_psy_set_property(struct power_supply *psy,
 				  enum power_supply_property psp,
 				  const union power_supply_propval *pval)
@@ -1479,6 +1570,22 @@ static int bms_probe(struct platform_device *pdev)
 	rc = device_create_file(&bms->psy->dev, &dev_attr_soc_shutdown_offset);
 	if (rc < 0)
 		dev_err(&bms->psy->dev, "Failed to create soc scaling offset for shutdown\n");
+
+	rc = device_create_file(&bms->psy->dev, &dev_attr_charge_gain_mc);
+	if (rc < 0)
+		dev_err(&bms->psy->dev, "Failed to create charge gain mc file\n");
+
+	rc = device_create_file(&bms->psy->dev, &dev_attr_charge_current_ref);
+	if (rc < 0)
+		dev_err(&bms->psy->dev, "Failed to create charge current ref file\n");
+
+	rc = device_create_file(&bms->psy->dev, &dev_attr_dcdc_status);
+	if (rc < 0)
+		dev_err(&bms->psy->dev, "Failed to create dcdc status file\n");
+
+	rc = device_create_file(&bms->psy->dev, &dev_attr_bat_chg_status);
+	if (rc < 0)
+		dev_err(&bms->psy->dev, "Failed to create bat chg status file\n");
 
 	iio_list = sw5100_get_ext_channels(bms->dev, sw5100_qbg_ext_iio_chan,
 		ARRAY_SIZE(sw5100_qbg_ext_iio_chan));
