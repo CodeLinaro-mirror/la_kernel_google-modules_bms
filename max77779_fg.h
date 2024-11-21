@@ -35,6 +35,8 @@
 
 #define MAX77779_FG_NDGB_ADDRESS 0x37
 
+#define MAX77779_FG_MAX_LOG_REGS	30
+
 static const struct maxfg_reg max77779_fg[] = {
 	[MAXFG_TAG_avgc] = { ATOM_INIT_REG16(MAX77779_FG_AvgCurrent)},
 	[MAXFG_TAG_cnfg] = { ATOM_INIT_REG16(MAX77779_FG_Config)},
@@ -90,7 +92,6 @@ static const struct maxfg_reg max77779_debug_fg[] = {
 
 struct max77779_fg_chip {
 	struct device *dev;
-	struct i2c_client *primary;
 	struct i2c_client *secondary;
 	struct device *pmic_dev;
 
@@ -186,6 +187,13 @@ struct max77779_fg_chip {
 	/* get suspend/resume notification */
 	struct mutex save_data_lock;
 	struct wakeup_source *fg_wake_lock;
+
+	struct delayed_work stuck_monitor_work;
+	int fg_stuck_count;
+	u16 timer;
+
+	/* mutex lock to access FG USR reg */
+	struct mutex usr_lock;
 };
 
 /** ------------------------------------------------------------------------ */
@@ -338,6 +346,8 @@ int max77779_model_check_state(struct max77779_model_data *model_data);
 int max77779_load_gauge_model(struct max77779_model_data *model_data, int fw_rev, int fw_sub_rev);
 
 ssize_t max77779_model_state_cstr(char *buf, int max, struct max77779_model_data *model_data);
+int max77779_fg_param_cstr(char *buf, int max, const struct max77779_model_data *model_data);
+int max77779_fg_param_sscan(struct max77779_model_data *model_data, const char *buf, int max);
 int max77779_fg_model_cstr(char *buf, int max, const struct max77779_model_data *model_data);
 int max77779_fg_model_sscan(struct max77779_model_data *model_data, const char *buf, int max);
 bool max77779_fg_check_state(struct max77779_model_data *model_data);
