@@ -6099,7 +6099,7 @@ static struct attribute *p9221_attributes[] = {
 };
 
 static ssize_t p9221_rxdata_read(struct file *filp, struct kobject *kobj,
-				 struct bin_attribute *bin_attr,
+				 const struct bin_attribute *bin_attr,
 				 char *buf, loff_t pos, size_t size)
 {
 	struct p9221_charger_data *charger;
@@ -6110,7 +6110,7 @@ static ssize_t p9221_rxdata_read(struct file *filp, struct kobject *kobj,
 	return size;
 }
 
-static struct bin_attribute bin_attr_rxdata = {
+static __ro_after_init struct bin_attribute bin_attr_rxdata = {
 	.attr = {
 		.name = "rxdata",
 		.mode = 0400,
@@ -6120,7 +6120,7 @@ static struct bin_attribute bin_attr_rxdata = {
 };
 
 static ssize_t p9221_txdata_read(struct file *filp, struct kobject *kobj,
-				 struct bin_attribute *bin_attr,
+				 const struct bin_attribute *bin_attr,
 				 char *buf, loff_t pos, size_t size)
 {
 	struct p9221_charger_data *charger;
@@ -6131,7 +6131,7 @@ static ssize_t p9221_txdata_read(struct file *filp, struct kobject *kobj,
 }
 
 static ssize_t p9221_txdata_write(struct file *filp, struct kobject *kobj,
-				  struct bin_attribute *bin_attr,
+				  const struct bin_attribute *bin_attr,
 				  char *buf, loff_t pos, size_t size)
 {
 	struct p9221_charger_data *charger;
@@ -6141,7 +6141,7 @@ static ssize_t p9221_txdata_write(struct file *filp, struct kobject *kobj,
 	return size;
 }
 
-static struct bin_attribute bin_attr_txdata = {
+static __ro_after_init struct bin_attribute bin_attr_txdata = {
 	.attr = {
 		.name = "txdata",
 		.mode = 0600,
@@ -6151,7 +6151,7 @@ static struct bin_attribute bin_attr_txdata = {
 	.size  = P9221R5_DATA_SEND_BUF_SIZE,
 };
 
-static struct bin_attribute *p9221_bin_attributes[] = {
+static const struct bin_attribute *p9221_bin_attributes[] = {
 	&bin_attr_txdata,
 	&bin_attr_rxdata,
 	NULL,
