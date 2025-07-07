@@ -1298,8 +1298,8 @@ static void p9221_tx_work(struct work_struct *work)
 
 static void p9221_vrect_timer_handler(struct timer_list *t)
 {
-	struct p9221_charger_data *charger = from_timer(charger,
-							t, vrect_timer);
+	struct p9221_charger_data *charger = timer_container_of(charger, t,
+								vrect_timer);
 
 	if (charger->align == WLC_ALIGN_CHECKING) {
 		charger->align = WLC_ALIGN_MOVE;
@@ -1320,8 +1320,8 @@ static void p9221_vrect_timer_handler(struct timer_list *t)
 
 static void p9221_align_timer_handler(struct timer_list *t)
 {
-	struct p9221_charger_data *charger = from_timer(charger,
-							t, align_timer);
+	struct p9221_charger_data *charger = timer_container_of(charger, t,
+								align_timer);
 
 	charger->align = WLC_ALIGN_ERROR;
 	logbuffer_log(charger->log, "align: timeout no IRQ");
