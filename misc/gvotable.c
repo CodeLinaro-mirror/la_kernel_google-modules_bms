@@ -137,7 +137,7 @@ struct election_slot {
 	struct dentry *de;
 };
 
-int gvotable_comparator_uint_max(void *l, void *r)
+static int gvotable_comparator_uint(void *l, void *r)
 {
 	unsigned int a = *((unsigned int *)&l);
 	unsigned int b = *((unsigned int *)&r);
@@ -149,7 +149,6 @@ int gvotable_comparator_uint_max(void *l, void *r)
 	else
 		return 0;
 }
-EXPORT_SYMBOL_GPL(gvotable_comparator_uint_max);
 
 static int gvotable_comparator_int(void *l, void *r)
 {
@@ -178,10 +177,17 @@ int gvotable_comparator_int_min(void *a, void *b)
 }
 EXPORT_SYMBOL_GPL(gvotable_comparator_int_min);
 
-/* compares l and r as integers */
+/* compares l and r as unsigned integers */
+int gvotable_comparator_uint_max(void *a, void *b)
+{
+	return -gvotable_comparator_uint(a, b);
+}
+EXPORT_SYMBOL_GPL(gvotable_comparator_uint_max);
+
+/* compares l and r as unsigned integers */
 int gvotable_comparator_uint_min(void *a, void *b)
 {
-	return -gvotable_comparator_uint_max(a, b);
+	return gvotable_comparator_uint(a, b);
 }
 EXPORT_SYMBOL_GPL(gvotable_comparator_uint_min);
 

@@ -891,9 +891,13 @@ static int max77759_gpio_get_direction(struct gpio_chip *chip,
 	}
 
 	if (offset == MAX77759_GPIO5_OFF)
-		return !(val & MAX77759_GPIO5_DIR_MASK);
+		return ((val & MAX77759_GPIO5_DIR_MASK)
+			? GPIO_LINE_DIRECTION_OUT
+			: GPIO_LINE_DIRECTION_IN);
 
-	return !(val & MAX77759_GPIO6_DIR_MASK);
+	return ((val & MAX77759_GPIO6_DIR_MASK)
+		? GPIO_LINE_DIRECTION_OUT
+		: GPIO_LINE_DIRECTION_IN);
 }
 
 /* offset is gpionum - 1 */
@@ -1075,10 +1079,10 @@ static int max77729_gpio_set_irq_type(struct irq_data *d, unsigned int type)
 	const int index = d->hwirq - MAX77759_GPIO5_OFF;
 
 	switch (type) {
-	case IRQF_TRIGGER_FALLING:
+	case IRQ_TYPE_EDGE_FALLING:
 		data->irq_trig_falling[index] = 1;
 		break;
-	case IRQF_TRIGGER_RISING:
+	case IRQ_TYPE_EDGE_RISING:
 		data->irq_trig_falling[index] = 0;
 		break;
 	default:

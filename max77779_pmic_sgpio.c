@@ -200,12 +200,12 @@ static int max77779_pmic_sgpio_set_irq_type(struct irq_data *d,
 	struct max77779_pmic_sgpio_info *info = gpiochip_get_data(gc);
 
 	switch (type) {
-	case IRQF_TRIGGER_NONE:
-	case IRQF_TRIGGER_RISING:
-	case IRQF_TRIGGER_FALLING:
-	case (IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING):
-	case IRQF_TRIGGER_HIGH:
-	case IRQF_TRIGGER_LOW:
+	case IRQ_TYPE_NONE:
+	case IRQ_TYPE_EDGE_RISING:
+	case IRQ_TYPE_EDGE_FALLING:
+	case IRQ_TYPE_EDGE_BOTH:
+	case IRQ_TYPE_LEVEL_HIGH:
+	case IRQ_TYPE_LEVEL_LOW:
 		info->trig_type[d->hwirq] = type;
 		break;
 	default:
@@ -235,20 +235,20 @@ static void max77779_pmic_sgpio_bus_lock(struct irq_data *d)
 	mutex_lock(&info->lock);
 }
 
-static int max77779_pmic_sgpio_irqf2cnfg(unsigned int irqf)
+static int max77779_pmic_sgpio_irqt2cnfg(unsigned int irqt)
 {
-	switch (irqf) {
-	case IRQF_TRIGGER_NONE:
+	switch (irqt) {
+	case IRQ_TYPE_NONE:
 		return MAX77779_SGPIO_CNFG_IRQ_DISABLE;
-	case IRQF_TRIGGER_RISING:
+	case IRQ_TYPE_EDGE_RISING:
 		return MAX77779_SGPIO_CNFG_IRQ_RISING;
-	case IRQF_TRIGGER_FALLING:
+	case IRQ_TYPE_EDGE_FALLING:
 		return MAX77779_SGPIO_CNFG_IRQ_FALLING;
-	case (IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING):
+	case IRQ_TYPE_EDGE_BOTH:
 		return MAX77779_SGPIO_CNFG_IRQ_BOTH;
-	case IRQF_TRIGGER_HIGH:
+	case IRQ_TYPE_LEVEL_HIGH:
 		return MAX77779_SGPIO_CNFG_IRQ_RISING;
-	case IRQF_TRIGGER_LOW:
+	case IRQ_TYPE_LEVEL_LOW:
 		return MAX77779_SGPIO_CNFG_IRQ_FALLING;
 	default:
 		return MAX77779_SGPIO_CNFG_IRQ_DISABLE;
@@ -284,7 +284,7 @@ static void max77779_pmic_sgpio_bus_sync_unlock(struct irq_data *d)
 		if (masked)
 			cnfg_val = MAX77779_SGPIO_CNFG_IRQ_DISABLE;
 		else
-			cnfg_val = max77779_pmic_sgpio_irqf2cnfg(info->trig_type[id]);
+			cnfg_val = max77779_pmic_sgpio_irqt2cnfg(info->trig_type[id]);
 		cnfg_val <<= MAX77779_PMIC_GPIO_SGPIO_CNFG0_IRQ_SEL_SHIFT;
 
 		reg = MAX77779_PMIC_GPIO_SGPIO_CNFG0 + id;

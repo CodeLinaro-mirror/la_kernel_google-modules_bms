@@ -325,7 +325,7 @@ static int maxq_rs_read(struct max77759_maxq *maxq, gbms_tag_t tag, u8 *data)
 		buff[RS_TAG_OFFSET_ADDR] = RSBM_ADDR;
 		len = RS_TAG_LENGTH;
 	} else if (tag == GBMS_TAG_RSBR) {
-		buff[RS_TAG_OFFSET_ADDR] = RSBM_ADDR;
+		buff[RS_TAG_OFFSET_ADDR] = RSBR_ADDR;
 		len = RS_TAG_LENGTH;
 	} else if (tag == GBMS_TAG_SUFG) {
 		buff[RS_TAG_OFFSET_ADDR] = SUFG_ADDR;

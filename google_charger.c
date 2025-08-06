@@ -707,9 +707,11 @@ static int info_usb_state(union gbms_ce_adapter_details *ad,
 
 	if (usb_psy) {
 		int voltage_now, current_now;
+		int tcpm_online;
 
 		/* TODO: handle POWER_SUPPLY_PROP_REAL_TYPE in qc-compat */
 		usb_type = PSY_GET_PROP(usb_psy, POWER_SUPPLY_PROP_USB_TYPE);
+
 		if (tcpm_psy) {
 			usbc_type = PSY_GET_PROP(tcpm_psy,
 						 POWER_SUPPLY_PROP_USB_TYPE);
@@ -722,12 +724,21 @@ static int info_usb_state(union gbms_ce_adapter_details *ad,
 						  &chg_drv->adapter_capabilities[ADAPTER_CAP_APDO],
 						  false);
 			}
+
+			tcpm_online = PSY_GET_PROP(tcpm_psy, POWER_SUPPLY_PROP_ONLINE);
+			if (tcpm_online == 2)
+				amperage_max = PSY_GET_PROP(tcpm_psy,
+							    POWER_SUPPLY_PROP_CURRENT_MAX);
+			else
+				amperage_max = PSY_GET_PROP(usb_psy,
+							    POWER_SUPPLY_PROP_CURRENT_MAX);
+		} else {
+			amperage_max = PSY_GET_PROP(usb_psy,
+							POWER_SUPPLY_PROP_CURRENT_MAX);
 		}
 
 		voltage_max = PSY_GET_PROP(usb_psy,
 					   POWER_SUPPLY_PROP_VOLTAGE_MAX);
-		amperage_max = PSY_GET_PROP(usb_psy,
-					    POWER_SUPPLY_PROP_CURRENT_MAX);
 		voltage_now = PSY_GET_PROP(usb_psy,
 					   POWER_SUPPLY_PROP_VOLTAGE_NOW);
 		current_now = PSY_GET_PROP(usb_psy,
@@ -4941,9 +4952,9 @@ static int chg_therm_set_wlc_online(struct chg_drv *chg_drv)
 	if (ret < 0 || pval.intval == PPS_PSY_OFFLINE) {
 		int dc_icl;
 
-		/* OFFLINE goes to online if dc_icl allows */
+		/* OFFLINE goes to online if dc_icl allows or votable not available */
 		dc_icl = gvotable_get_current_int_vote(chg_drv->dc_icl_votable);
-		if (dc_icl > 0)
+		if (dc_icl != 0)
 			pval.intval = PPS_PSY_FIXED_ONLINE;
 
 		/* will reset offline just in case */
@@ -4993,7 +5004,7 @@ static int chg_therm_set_wlc_offline(struct chg_drv *chg_drv, int from_state)
 		if (from_state == PPS_PSY_PROG_ONLINE) {
 			dc_icl = gvotable_get_current_int_vote(
 					chg_drv->dc_icl_votable);
-			if (dc_icl > 0)
+			if (dc_icl != 0)
 				pval.intval = PPS_PSY_FIXED_ONLINE;
 		}
 
@@ -5682,6 +5693,17 @@ static void google_charger_init_work(struct work_struct *work)
 	if (ret == -EPROBE_DEFER)
 		goto retry_init_work;
 
+	/* pass logbuffer_bd addr to google_battery to log AACP */
+	if (chg_drv->bd_state.bd_log) {
+		ret = GPSY_SET_INT64_PROP(chg_drv->bat_psy,
+					 GBMS_PROP_LOGBUFFER_BD,
+					 chg_drv->bd_state.bd_log);
+		if (ret == -EAGAIN)
+			goto retry_init_work;
+		if (ret < 0)
+			pr_info("send logbuffer_bd addr failed %d", ret);
+	}
+
 	/* PPS negotiation handled in google_charger */
 	if (!chg_drv->tcpm_psy) {
 		pr_info("PPS not available\n");
@@ -5734,17 +5756,6 @@ static void google_charger_init_work(struct work_struct *work)
 	ret = power_supply_reg_notifier(&chg_drv->psy_nb);
 	if (ret < 0)
 		pr_err("Cannot register power supply notifer, ret=%d\n", ret);
-
-	/* pass logbuffer_bd addr to google_battery to log AACP */
-	if (chg_drv->bd_state.bd_log) {
-		ret = GPSY_SET_INT64_PROP(chg_drv->bat_psy,
-					 GBMS_PROP_LOGBUFFER_BD,
-					 chg_drv->bd_state.bd_log);
-		if (ret == -EAGAIN)
-			goto retry_init_work;
-		if (ret < 0)
-			pr_info("send logbuffer_bd addr failed %d", ret);
-	}
 
 	chg_drv->init_done = true;
 	pr_info("google_charger chg=%d bat=%d wlc=%d usb=%d ext=%d tcpm=%d init_work done\n",
