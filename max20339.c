@@ -296,8 +296,8 @@ static int max20339_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return (val & mask) >> shift;
 }
 
-static void max20339_gpio_set(struct gpio_chip *chip,
-			      unsigned int offset, int value)
+static int max20339_gpio_set(struct gpio_chip *chip,
+			     unsigned int offset, int value)
 {
 	int ret;
 	unsigned int tmp;
@@ -338,9 +338,9 @@ static void max20339_gpio_set(struct gpio_chip *chip,
 					 tmp);
 		if (ret < 0)
 			dev_err(&ovp->client->dev, "OVLOSEL update error: ret %d\n", ret);
-		return;
+		return ret;
 	default:
-		return;
+		return -EINVAL;
 	}
 
 	ret = regmap_update_bits_base(ovp->regmap, sw_cntl_reg, mask,  tmp,
@@ -356,6 +356,7 @@ static void max20339_gpio_set(struct gpio_chip *chip,
 		mdelay(20);
 	}
 
+	return ret;
 }
 #endif
 

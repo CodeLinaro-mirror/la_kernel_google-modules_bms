@@ -1748,7 +1748,7 @@ static int max77759_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return 0;
 }
 
-static void max77759_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
+static int max77759_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
 {
 	struct max77759_chgr_data *data = gpiochip_get_data(chip);
 	int ret = 0;
@@ -1768,6 +1768,8 @@ static void max77759_gpio_set(struct gpio_chip *chip, unsigned int offset, int v
 		dev_err(data->dev, "GPIO %d: value=%d ret:%d\n", offset, value, ret);
 	else
 		dev_dbg(data->dev, "GPIO %d: value=%d ret:%d\n", offset, value, ret);
+
+	return ret;
 }
 
 static void max77759_gpio_init(struct max77759_chgr_data *data)

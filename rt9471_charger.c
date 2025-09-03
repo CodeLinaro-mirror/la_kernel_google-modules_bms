@@ -1762,7 +1762,7 @@ static int rt9471_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return 0;
 }
 
-static void rt9471_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
+static int rt9471_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
 {
 	struct rt9471_chip *data = gpiochip_get_data(chip);
 	int ret;
@@ -1781,6 +1781,8 @@ static void rt9471_gpio_set(struct gpio_chip *chip, unsigned int offset, int val
 
 	if (ret < 0)
 		dev_err(data->dev, "GPIO%d: value=%d ret:%d\n", offset, value, ret);
+
+	return ret;
 }
 
 static void rt9471_gpio_init(struct rt9471_chip *chip)

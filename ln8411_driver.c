@@ -4783,7 +4783,7 @@ static int ln8411_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return ret;
 }
 
-static void ln8411_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
+static int ln8411_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
 {
 	struct ln8411_charger *ln8411 = gpiochip_get_data(chip);
 	int ret = 0;
@@ -4809,6 +4809,8 @@ static void ln8411_gpio_set(struct gpio_chip *chip, unsigned int offset, int val
 
 	if (ret < 0)
 		dev_err(&ln8411->client->dev, "GPIO%d: value=%d ret:%d\n", offset, value, ret);
+
+	return ret;
 }
 
 static void ln8411_gpio_init(struct ln8411_charger *ln8411)
