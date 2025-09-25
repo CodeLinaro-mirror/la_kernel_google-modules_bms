@@ -7,6 +7,7 @@
  */
 
 
+#include <linux/cleanup.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/version.h>
@@ -33,16 +34,18 @@ static struct device_node *hl7132_find_config(struct device_node *node)
 
 	if (!node)
 		return node;
+
 	temp = of_parse_phandle(node, "hl7132,google_cpm", 0);
 	if (temp)
-		node = temp;
-	return node;
+	        return temp;
+
+	return of_node_get(node);
 }
 
 int hl7132_probe_pps(struct hl7132_charger *hl7132_chg)
 {
 	bool pps_available = false;
-	struct device_node *node;
+	struct device_node *node __free(device_node);
 	int ret;
 
 	node = hl7132_find_config(hl7132_chg->dev->of_node);
@@ -108,7 +111,7 @@ int hl7132_usbpd_setup(struct hl7132_charger *hl7132)
 
 		hl7132->pd = tcpm_psy;
 	} else if (hl7132->tcpm_phandle) {
-		struct device_node *node;
+		struct device_node *node __free(device_node);
 
 		node = hl7132_find_config(hl7132->dev->of_node);
 		if (!node)
