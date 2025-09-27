@@ -13,7 +13,6 @@
 #include <linux/version.h>
 #include <linux/delay.h>
 #include <linux/dev_printk.h>
-#include <linux/of_device.h>
 #include <linux/regmap.h>
 
 #include "hl7132_regs.h"
@@ -28,32 +27,32 @@ int debug_no_logbuffer;
 
 static void hl7132_chg_stats_set_apdo(struct hl7132_chg_stats *chg_data, u32 apdo);
 
-static struct device_node *hl7132_find_config(struct device_node *node)
+static struct fwnode_handle *hl7132_find_config(struct fwnode_handle *fwnode)
 {
-	struct device_node *temp;
+	struct fwnode_handle *temp;
 
-	if (!node)
-		return node;
+	if (!fwnode)
+		return fwnode;
 
-	temp = of_parse_phandle(node, "hl7132,google_cpm", 0);
+	temp = fwnode_find_reference(fwnode, "hl7132,google_cpm", 0);
 	if (temp)
 	        return temp;
 
-	return of_node_get(node);
+	return fwnode_handle_get(fwnode);
 }
 
 int hl7132_probe_pps(struct hl7132_charger *hl7132_chg)
 {
 	bool pps_available = false;
-	struct device_node *node __free(device_node);
+	struct fwnode_handle *fwnode __free(fwnode_handle);
 	int ret;
 
-	node = hl7132_find_config(hl7132_chg->dev->of_node);
-	if (!node)
+	fwnode = hl7132_find_config(dev_fwnode(hl7132_chg->dev));
+	if (!fwnode)
 		return -ENODEV;
 
-	ret = of_property_read_u32(node, "google,tcpm-power-supply",
-				   &hl7132_chg->tcpm_phandle);
+	ret = fwnode_property_read_u32(fwnode, "google,tcpm-power-supply",
+				       &hl7132_chg->tcpm_phandle);
 	if (ret < 0)
 		dev_warn(hl7132_chg->dev,
 			"hl7132: google,tcpm-power-supply not defined\n");
@@ -111,13 +110,13 @@ int hl7132_usbpd_setup(struct hl7132_charger *hl7132)
 
 		hl7132->pd = tcpm_psy;
 	} else if (hl7132->tcpm_phandle) {
-		struct device_node *node __free(device_node);
+		struct fwnode_handle *fwnode __free(fwnode_handle);
 
-		node = hl7132_find_config(hl7132->dev->of_node);
-		if (!node)
+		fwnode = hl7132_find_config(dev_fwnode(hl7132->dev));
+		if (!fwnode)
 			return -ENODEV;
 
-		tcpm_psy = pps_get_tcpm_psy(node, 2);
+		tcpm_psy = pps_get_tcpm_psy(fwnode, 2);
 		if (IS_ERR(tcpm_psy))
 			return PTR_ERR(tcpm_psy);
 		if (!tcpm_psy) {
