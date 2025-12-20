@@ -2108,7 +2108,7 @@ static int rt9471_probe(struct i2c_client *client)
 		if (!dn)
 			dev_warn(chip->dev, "Failed to find %s DT node\n",
 				 chip->gpio.label);
-		chip->gpio.fwnode = of_node_to_fwnode(dn);
+		chip->gpio.fwnode = of_fwnode_handle(dn);
 
 		ret = devm_gpiochip_add_data(chip->dev, &chip->gpio, chip);
 		dev_info(chip->dev, "%d GPIOs registered ret:%d\n",

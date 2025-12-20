@@ -3368,7 +3368,7 @@ static int max77759_charger_probe(struct i2c_client *client)
 	dn = of_find_node_by_name(client->dev.of_node, data->gpio.label);
 	if (!dn)
 		dev_err(&client->dev, "Failed to find %s DT node\n", data->gpio.label);
-	data->gpio.fwnode = of_node_to_fwnode(dn);
+	data->gpio.fwnode = of_fwnode_handle(dn);
 
 	ret = devm_gpiochip_add_data(&client->dev, &data->gpio, data);
 	dev_info(&client->dev, "%d GPIOs registered ret: %d\n", data->gpio.ngpio, ret);

@@ -8411,7 +8411,7 @@ static int p9221_charger_probe(struct i2c_client *client)
 		if (!dp)
 			dev_err(&client->dev, "Failed to find %s DT node\n",
 				charger->gpio.label);
-		charger->gpio.fwnode = of_node_to_fwnode(dp);
+		charger->gpio.fwnode = of_fwnode_handle(dp);
 
 		ret = devm_gpiochip_add_data(&client->dev, &charger->gpio, charger);
 		dev_info(&client->dev, "%d GPIOs registered ret:%d\n",

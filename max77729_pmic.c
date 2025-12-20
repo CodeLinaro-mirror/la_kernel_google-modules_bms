@@ -1343,7 +1343,7 @@ static int max77729_pmic_probe(struct i2c_client *client)
 		dn = of_find_node_by_name(dev->of_node, data->gpio.label);
 		if (!dn)
 			dev_err(dev, "Failed to find %s DT node\n", data->gpio.label);
-		data->gpio.fwnode = of_node_to_fwnode(dn);
+		data->gpio.fwnode = of_fwnode_handle(dn);
 
 		/* check regmap-irq */
 		girq->chip = &max77729_gpio_irq_chip;

@@ -437,7 +437,7 @@ static int max77779_pmic_sgpio_probe(struct platform_device *pdev)
 	dn = of_find_node_by_name(dev->of_node, gpio_chip->label);
 	if (!dn)
 		dev_err(dev, "Failed to find %s DT node\n", gpio_chip->label);
-	gpio_chip->fwnode = of_node_to_fwnode(dn);
+	gpio_chip->fwnode = of_fwnode_handle(dn);
 
 	gpio_irq_chip_set_chip(&gpio_chip->irq, &max77779_pmic_sgpio_irq_chip);
 

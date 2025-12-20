@@ -430,7 +430,7 @@ static int max20339_probe(struct i2c_client *client)
 	if (!dp)
 		dev_err(&client->dev, "Failed to find %s DT node\n",
 			ovp->gpio.label);
-	ovp->gpio.fwnode = of_node_to_fwnode(dp);
+	ovp->gpio.fwnode = of_fwnode_handle(dp);
 
 	ret = devm_gpiochip_add_data(&client->dev, &ovp->gpio, ovp);
 	if (ret)

@@ -5601,7 +5601,7 @@ static int ln8411_probe(struct i2c_client *client)
 				  ln8411_charger->gpio.label);
 	if (!dn)
 		dev_err(&client->dev, "Failed to find %s DT node\n", ln8411_charger->gpio.label);
-	ln8411_charger->gpio.fwnode = of_node_to_fwnode(dn);
+	ln8411_charger->gpio.fwnode = of_fwnode_handle(dn);
 
 	ret = devm_gpiochip_add_data(&client->dev, &ln8411_charger->gpio, ln8411_charger);
 	dev_info(&client->dev, "%d GPIOs registered ret: %d\n", ln8411_charger->gpio.ngpio, ret);
